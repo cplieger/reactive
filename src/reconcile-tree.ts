@@ -2,6 +2,19 @@
 // Handles attribute patching, text node updates, element reordering,
 // and recursive child reconciliation. Keying via data-* or *-id attrs.
 
+const handlerKeysMap = new WeakMap<HTMLElement, Set<string>>();
+
+/** Register an on* handler property key for reconciliation tracking. */
+export function trackHandler(el: HTMLElement, key: string): void {
+  let keys = handlerKeysMap.get(el);
+  if (!keys) {
+    keys = new Set();
+    handlerKeysMap.set(el, keys);
+  }
+  keys.add(key);
+}
+
+/** Replace a parent's children with the given nodes/strings, reconciling against existing DOM. */
 export function patch(
   parent: Node,
   ...children: (string | Node | DocumentFragment | null | undefined)[]
@@ -22,6 +35,7 @@ export function patch(
   reconcileChildren(parent, newChildren);
 }
 
+/** Reconcile a parent node's children against a new set of child nodes, patching in place. */
 export function reconcileChildren(parent: Node, newChildren: Node[]): void {
   const oldChildren = Array.from(parent.childNodes);
   const oldByKey = new Map<string, Node>();
@@ -110,7 +124,7 @@ function nodeKey(node: Node): string {
     return "";
   }
   for (const attr of (node as Element).attributes) {
-    if (attr.name === "data-col" || attr.name.endsWith("-id")) {
+    if (attr.name.endsWith("-id")) {
       return `${attr.name}=${attr.value}`;
     }
   }
@@ -130,5 +144,26 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
   }
   if (oldEl.hidden !== newEl.hidden) {
     oldEl.hidden = newEl.hidden;
+  }
+
+  // Reconcile on* event handler properties (not reflected as attributes).
+  const newKeys = handlerKeysMap.get(newEl);
+  const oldKeys = handlerKeysMap.get(oldEl);
+  if (oldKeys) {
+    for (const key of oldKeys) {
+      if (!newKeys?.has(key)) {
+        (oldEl as unknown as Record<string, unknown>)[key] = null;
+      }
+    }
+  }
+  if (newKeys) {
+    const oldRec = oldEl as unknown as Record<string, unknown>;
+    const newRec = newEl as unknown as Record<string, unknown>;
+    for (const key of newKeys) {
+      oldRec[key] = newRec[key];
+    }
+    handlerKeysMap.set(oldEl, new Set(newKeys));
+  } else if (oldKeys) {
+    handlerKeysMap.delete(oldEl);
   }
 }

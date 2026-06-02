@@ -1,8 +1,10 @@
 // Keyed-list DOM reconciliation with mount/update/onRemove lifecycle.
 // Identity-preserving: existing elements survive across renders.
 
+/** Attribute name used to store reconciliation keys on elements. */
 export const KEY_ATTR = "data-reconcile-key";
 
+/** Specification for keyed-list reconciliation lifecycle callbacks. */
 export interface ReconcileSpec<T> {
   key: (item: T) => string;
   mount: (item: T) => HTMLElement;
@@ -10,6 +12,7 @@ export interface ReconcileSpec<T> {
   onRemove?: (el: HTMLElement, key: string) => void;
 }
 
+/** Reconcile a keyed list of items into a parent node, preserving existing elements by key. */
 export function reconcile<T>(
   parent: ParentNode,
   items: readonly T[],

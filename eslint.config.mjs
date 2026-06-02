@@ -11,11 +11,9 @@ export default [
   // 1. Ignore generated/build outputs and configs that don't need linting.
   {
     ignores: [
-      // Dependencies (any depth — vibekit's web/static-src/node_modules nests deep)
+      // Dependencies (any depth)
       "**/node_modules/**",
       // Build output / generated bundles (TS->JS, CSS bundles, etc.)
-      "**/static/**",
-      "**/static-src/dist/**",
       "**/dist/**",
       "**/build/**",
       "**/.next/**",
@@ -25,7 +23,6 @@ export default [
       "**/*.min.*",
       "**/*.gen.ts",
       "**/*.gen.js",
-      "**/wire/*.gen.ts",
       // Test fixtures that aren't real code
       "**/test-stubs/**",
       "**/__mocks__/**",
