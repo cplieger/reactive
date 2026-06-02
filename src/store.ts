@@ -1,6 +1,4 @@
-// Typed per-key reactive store with auto-tracked effects and computed.
-// Merges subflux's typed StoreMap pattern with vibekit's MessageChannel
-// batching and effect-cleanup semantics.
+// Typed per-key reactive store with auto-tracked effects, computed, and batching.
 //
 // Usage:
 //   import { createStore } from './store.js';
@@ -11,6 +9,7 @@ type Callback = (value: unknown) => void;
 // eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is intentional for effect return
 type Cleanup = void | (() => void);
 
+/** A typed per-key reactive store with auto-tracked effects, computed, and batching. */
 export interface Store<M> {
   get<K extends keyof M & string>(key: K): M[K];
   set<K extends keyof M & string>(key: K, value: M[K]): void;
@@ -20,6 +19,7 @@ export interface Store<M> {
   batch(fn: () => void): void;
 }
 
+/** Create a typed reactive store. Keys are auto-tracked in effects; writes notify subscribers. */
 export function createStore<M>(): Store<M> {
   const state: Record<string, unknown> = {};
   const subscribers: Record<string, Callback[]> = {};
@@ -52,7 +52,7 @@ export function createStore<M>(): Store<M> {
   function set<K extends keyof M & string>(key: K, value: M[K]): void {
     const prev = state[key];
     state[key] = value;
-    if (prev === value) {
+    if (Object.is(prev, value)) {
       return;
     }
     if (batchDepth > 0) {
@@ -104,8 +104,13 @@ export function createStore<M>(): Store<M> {
       }
       unsubs = [];
       if (cleanup) {
-        cleanup();
+        const c = cleanup;
         cleanup = undefined;
+        try {
+          c();
+        } catch (e) {
+          console.error("store effect cleanup error:", e);
+        }
       }
       const prev = tracking;
       tracking = new Set();
@@ -124,14 +129,22 @@ export function createStore<M>(): Store<M> {
     };
     run();
     return () => {
+      if (disposed) {
+        return;
+      }
       disposed = true;
       for (const u of unsubs) {
         u();
       }
       unsubs = [];
       if (cleanup) {
-        cleanup();
+        const c = cleanup;
         cleanup = undefined;
+        try {
+          c();
+        } catch (e) {
+          console.error("store effect cleanup error:", e);
+        }
       }
     };
   }
