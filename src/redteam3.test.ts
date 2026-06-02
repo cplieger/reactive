@@ -14,7 +14,7 @@ import {
   patch,
   reconcileChildren,
 } from "./index.js";
-import type { EffectErrorHandler } from "./index.js";
+import type { EffectErrorHandler, ReadonlySignal } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // 1. Verify round-1/2 fixes are sound
@@ -103,15 +103,15 @@ describe("pathological graphs", () => {
   it("deep diamond (10 levels) fires leaf effect exactly once per change", () => {
     const root = signal(0);
     // Build diamond: each level splits into 2 computeds that merge at next level
-    let nodes: ReturnType<typeof computed>[] = [computed(() => root.value)];
+    let nodes: ReadonlySignal<number>[] = [computed(() => root.value)];
     for (let level = 0; level < 10; level++) {
-      const next: ReturnType<typeof computed>[] = [];
+      const next: ReadonlySignal<number>[] = [];
       for (const n of nodes) {
         next.push(computed(() => n.value + 1));
         next.push(computed(() => n.value + 2));
       }
       // Merge pairs
-      const merged: ReturnType<typeof computed>[] = [];
+      const merged: ReadonlySignal<number>[] = [];
       for (let i = 0; i < next.length; i += 2) {
         merged.push(computed(() => next[i]!.value + next[i + 1]!.value));
       }
@@ -167,7 +167,7 @@ describe("pathological graphs", () => {
 
   it("computed cycle detection throws", () => {
     // eslint-disable-next-line prefer-const
-    let b: ReturnType<typeof computed>;
+    let b: ReadonlySignal<number>;
     const a = computed(() => b.value + 1);
     b = computed(() => a.value + 1);
     expect(() => a.value).toThrow("Cycle detected");

@@ -1554,7 +1554,9 @@ describe("on", () => {
         () => s.value,
         (val, prev, prevResult) => {
           results.push({ val, prev, prevResult });
-          return undefined;
+          return () => {
+            /* cleanup */
+          };
         },
       ),
     );
@@ -1562,8 +1564,8 @@ describe("on", () => {
     s.value = 3;
     expect(results).toEqual([
       { val: 1, prev: undefined, prevResult: undefined },
-      { val: 2, prev: 1, prevResult: undefined },
-      { val: 3, prev: 2, prevResult: undefined },
+      { val: 2, prev: 1, prevResult: expect.any(Function) },
+      { val: 3, prev: 2, prevResult: expect.any(Function) },
     ]);
   });
 });

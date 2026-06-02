@@ -689,6 +689,7 @@ describe("RT8: batch cycle-detection + re-entrancy", () => {
       _caught = true;
       expect((e as Error).message).toContain("Cycle");
     }
+    expect(_caught).toBeDefined();
     const spy = vi.fn();
     const s2 = signal(10);
     effect(() => {
@@ -717,6 +718,7 @@ describe("RT8: batch cycle-detection + re-entrancy", () => {
       _caught = true;
       expect((e as Error).message).toContain("Cycle");
     }
+    expect(_caught).toBeDefined();
     const spy = vi.fn();
     const s = signal(0);
     effect(() => {
