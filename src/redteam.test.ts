@@ -23,7 +23,11 @@ describe("effect disposal edge cases", () => {
   it("dispose during own execution does not crash", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const disposeFn: { current: () => void } = { current: () => { /* placeholder */ } };
+    const disposeFn: { current: () => void } = {
+      current: () => {
+        /* placeholder */
+      },
+    };
     disposeFn.current = effect(() => {
       spy(s.value);
       if (s.value === 1) {
@@ -44,7 +48,9 @@ describe("effect disposal edge cases", () => {
     let cleanupCount = 0;
     const dispose = effect(() => {
       void s.value;
-      return () => { cleanupCount++; };
+      return () => {
+        cleanupCount++;
+      };
     });
     dispose();
     expect(cleanupCount).toBe(1);
@@ -55,7 +61,10 @@ describe("effect disposal edge cases", () => {
   it("dispose mid-batch does not crash", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(s.value); return undefined; });
+    const dispose = effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
@@ -109,7 +118,10 @@ describe("batch nesting + exceptions", () => {
   it("exception mid-batch still flushes pending effects", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     expect(() => {
       batch(() => {
@@ -124,7 +136,10 @@ describe("batch nesting + exceptions", () => {
   it("nested batch exception: outer batch still flushes", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
@@ -145,10 +160,15 @@ describe("batch nesting + exceptions", () => {
   it("batchDepth is not left dirty after exception", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     try {
-      batch(() => { throw new Error("oops"); });
+      batch(() => {
+        throw new Error("oops");
+      });
     } catch {
       // swallow
     }
@@ -168,7 +188,9 @@ describe("computed error caching invalidation", () => {
     let computeCount = 0;
     const c = computed(() => {
       computeCount++;
-      if (s.value === 0) { throw new Error("zero"); }
+      if (s.value === 0) {
+        throw new Error("zero");
+      }
       return s.value;
     });
     expect(() => c.value).toThrow("zero");
@@ -186,12 +208,18 @@ describe("computed error caching invalidation", () => {
     const s = signal(0);
     const errors: unknown[] = [];
     const values: unknown[] = [];
-    const prev = setEffectErrorHandler((e) => { errors.push(e); });
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
     effect(() => {
-      values.push(computed(() => {
-        if (s.value === 0) { throw new Error("err"); }
-        return s.value;
-      }).value);
+      values.push(
+        computed(() => {
+          if (s.value === 0) {
+            throw new Error("err");
+          }
+          return s.value;
+        }).value,
+      );
       return undefined;
     });
     expect(errors.length).toBe(1);
@@ -209,21 +237,30 @@ describe("computed error caching invalidation", () => {
 describe("custom equals throwing", () => {
   it("signal: exception in equals propagates to caller", () => {
     const s = signal(1, {
-      equals: () => { throw new Error("equals boom"); },
+      equals: () => {
+        throw new Error("equals boom");
+      },
     });
-    expect(() => { s.value = 2; }).toThrow("equals boom");
+    expect(() => {
+      s.value = 2;
+    }).toThrow("equals boom");
   });
 
   it("computed: exception in equals during execute is caught and downstream still notified", () => {
     const s = signal(1);
     const c = computed(() => s.value, {
-      equals: () => { throw new Error("eq error"); },
+      equals: () => {
+        throw new Error("eq error");
+      },
     });
     // First read works (no equals comparison on first compute via ensureFresh)
     expect(c.value).toBe(1);
     // Subscribe an effect that reads the computed
     const values: number[] = [];
-    effect(() => { values.push(c.value); return undefined; });
+    effect(() => {
+      values.push(c.value);
+      return undefined;
+    });
     expect(values).toEqual([1]);
     // Now change dep - execute() will compare using equals, which throws
     // The equals error is swallowed (treated as "changed"), downstream is notified
@@ -232,7 +269,10 @@ describe("custom equals throwing", () => {
     // System should still work after the error
     const s2 = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s2.value); return undefined; });
+    effect(() => {
+      spy(s2.value);
+      return undefined;
+    });
     spy.mockClear();
     s2.value = 42;
     expect(spy).toHaveBeenCalledWith(42);
@@ -247,7 +287,10 @@ describe("memory leaks: disposed effects unsubscribe", () => {
   it("disposed effect is removed from signal subscriber set", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(s.value); return undefined; });
+    const dispose = effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     dispose();
     spy.mockClear();
     s.value = 1;
@@ -270,7 +313,10 @@ describe("memory leaks: disposed effects unsubscribe", () => {
     const s = signal(1);
     const c = computed(() => s.value * 2);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(c.value); return undefined; });
+    const dispose = effect(() => {
+      spy(c.value);
+      return undefined;
+    });
     expect(spy).toHaveBeenCalledWith(2);
     dispose();
     s.value = 5;
@@ -291,8 +337,11 @@ describe("deep diamond graph", () => {
     const c = computed(() => a.value + b.value);
     const d = computed(() => c.value * 2);
     const spy = vi.fn();
-    effect(() => { spy(d.value); return undefined; });
-    expect(spy).toHaveBeenCalledWith((1+1+1+2)*2); // (2+3)*2 = 10
+    effect(() => {
+      spy(d.value);
+      return undefined;
+    });
+    expect(spy).toHaveBeenCalledWith((1 + 1 + 1 + 2) * 2); // (2+3)*2 = 10
     spy.mockClear();
     root.value = 10;
     // d = (a+b)*2 = ((10+1)+(10+2))*2 = (11+12)*2 = 46
@@ -302,12 +351,13 @@ describe("deep diamond graph", () => {
 
   it("wide diamond: many computeds from same source", () => {
     const src = signal(0);
-    const branches = Array.from({ length: 10 }, (_, i) =>
-      computed(() => src.value + i)
-    );
+    const branches = Array.from({ length: 10 }, (_, i) => computed(() => src.value + i));
     const sum = computed(() => branches.reduce((acc, b) => acc + b.value, 0));
     const spy = vi.fn();
-    effect(() => { spy(sum.value); return undefined; });
+    effect(() => {
+      spy(sum.value);
+      return undefined;
+    });
     spy.mockClear();
     src.value = 1;
     expect(spy).toHaveBeenCalledTimes(1);
@@ -349,7 +399,10 @@ describe("untracked nesting", () => {
     const b = signal(2);
     const c = computed(() => a.value + untracked(() => b.value));
     const spy = vi.fn();
-    effect(() => { spy(c.value); return undefined; });
+    effect(() => {
+      spy(c.value);
+      return undefined;
+    });
     expect(spy).toHaveBeenCalledWith(3);
     spy.mockClear();
     b.value = 99; // not tracked by computed
@@ -367,14 +420,21 @@ describe("reconcile edge cases", () => {
   it("duplicate keys: last one wins", () => {
     const parent = document.createElement("div");
     // Two items with same key - should not crash
-    reconcile(parent, [{ id: "a", v: 1 }, { id: "a", v: 2 }], {
-      key: (i) => i.id,
-      mount: (i) => {
-        const el = document.createElement("span");
-        el.textContent = String(i.v);
-        return el;
+    reconcile(
+      parent,
+      [
+        { id: "a", v: 1 },
+        { id: "a", v: 2 },
+      ],
+      {
+        key: (i) => i.id,
+        mount: (i) => {
+          const el = document.createElement("span");
+          el.textContent = String(i.v);
+          return el;
+        },
       },
-    });
+    );
     // Should have 2 elements (both mounted since key collision means second is new)
     expect(parent.children.length).toBe(2);
   });
@@ -460,12 +520,16 @@ describe("reconcile edge cases", () => {
 describe("store edge cases", () => {
   it("subscriber error does not prevent other subscribers", () => {
     const { set, subscribe: sub } = createStore<{ x: number }>();
-    const spy1 = vi.fn(() => { throw new Error("sub1 error"); });
+    const spy1 = vi.fn(() => {
+      throw new Error("sub1 error");
+    });
     const spy2 = vi.fn();
     sub("x", spy1);
     sub("x", spy2);
     // Should not throw, and spy2 should still be called
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => { /* noop */ });
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
+      /* noop */
+    });
     set("x", 1);
     expect(spy2).toHaveBeenCalledWith(1);
     consoleSpy.mockRestore();
@@ -476,7 +540,9 @@ describe("store edge cases", () => {
     const spy = vi.fn();
     store.subscribe("x", spy);
     try {
-      store.batch(() => { throw new Error("batch err"); });
+      store.batch(() => {
+        throw new Error("batch err");
+      });
     } catch {
       // swallow
     }

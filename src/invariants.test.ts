@@ -2,14 +2,7 @@
 // Tests for new core invariants: glitch-freedom, exception-safety, dispose/leak,
 // batch cycle-detection. Added as part of the Preact-style pull-based rewrite.
 import { describe, it, expect, vi } from "vitest";
-import {
-  signal,
-  effect,
-  batch,
-  computed,
-  untracked,
-  setEffectErrorHandler,
-} from "./index.js";
+import { signal, effect, batch, computed, untracked, setEffectErrorHandler } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // 1. Glitch-freedom: pull-based refresh guarantees consistent reads
@@ -22,7 +15,9 @@ describe("glitch-freedom", () => {
     const c = computed(() => a.value + 10);
     const d = computed(() => b.value + c.value);
     const spy = vi.fn();
-    effect(() => { spy(d.value); });
+    effect(() => {
+      spy(d.value);
+    });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenLastCalledWith(13); // 2 + 11
     spy.mockClear();
@@ -43,7 +38,9 @@ describe("glitch-freedom", () => {
       prev = c;
     }
     const spy = vi.fn();
-    effect(() => { spy(prev.value); });
+    effect(() => {
+      spy(prev.value);
+    });
     expect(spy).toHaveBeenCalledWith(10);
     spy.mockClear();
     s.value = 1;
@@ -58,9 +55,13 @@ describe("glitch-freedom", () => {
     for (let i = 0; i < 50; i++) {
       const spy = vi.fn();
       spies.push(spy);
-      effect(() => { spy(s.value); });
+      effect(() => {
+        spy(s.value);
+      });
     }
-    for (const spy of spies) { spy.mockClear(); }
+    for (const spy of spies) {
+      spy.mockClear();
+    }
     s.value = 1;
     for (const spy of spies) {
       expect(spy).toHaveBeenCalledTimes(1);
@@ -72,9 +73,11 @@ describe("glitch-freedom", () => {
     const a = signal(1);
     const cond = signal(true);
     const b = computed(() => a.value * 2);
-    const c = computed(() => cond.value ? b.value : 0);
+    const c = computed(() => (cond.value ? b.value : 0));
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(2);
     spy.mockClear();
     // Drop dep on b
@@ -94,10 +97,15 @@ describe("glitch-freedom", () => {
     const b = computed(() => x.value * y.value); // 2
     const c = computed(() => a.value + b.value); // 5
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(5);
     spy.mockClear();
-    batch(() => { x.value = 3; y.value = 4; });
+    batch(() => {
+      x.value = 3;
+      y.value = 4;
+    });
     // a=7, b=12, c=19 — effect fires once
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenLastCalledWith(19);
@@ -109,15 +117,21 @@ describe("glitch-freedom", () => {
 // ---------------------------------------------------------------------------
 describe("exception-safety", () => {
   it("effect body throw: other effects still run, later flush works", () => {
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
     const s = signal(0);
     const spy1 = vi.fn();
     const spy2 = vi.fn();
     effect(() => {
-      if (s.value > 0) { throw new Error("boom"); }
+      if (s.value > 0) {
+        throw new Error("boom");
+      }
       spy1(s.value);
     });
-    effect(() => { spy2(s.value); });
+    effect(() => {
+      spy2(s.value);
+    });
     spy1.mockClear();
     spy2.mockClear();
     s.value = 1;
@@ -130,14 +144,18 @@ describe("exception-safety", () => {
   });
 
   it("cleanup throw: effect still re-runs, no stuck flags", () => {
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
     const s = signal(0);
     const spy = vi.fn();
     let throwInCleanup = false;
     effect(() => {
       spy(s.value);
       return () => {
-        if (throwInCleanup) { throw new Error("cleanup-boom"); }
+        if (throwInCleanup) {
+          throw new Error("cleanup-boom");
+        }
       };
     });
     spy.mockClear();
@@ -155,7 +173,9 @@ describe("exception-safety", () => {
     const s = signal(0);
     let shouldThrow = false;
     const c = computed(() => {
-      if (shouldThrow) { throw new Error("comp-err"); }
+      if (shouldThrow) {
+        throw new Error("comp-err");
+      }
       return s.value * 2;
     });
     expect(c.value).toBe(0);
@@ -173,7 +193,9 @@ describe("exception-safety", () => {
     const s = signal(0);
     const c = computed(() => s.value * 2, {
       equals: (_a, _b) => {
-        if (throwInEquals) { throw new Error("eq-boom"); }
+        if (throwInEquals) {
+          throw new Error("eq-boom");
+        }
         return false; // always changed
       },
     });
@@ -189,13 +211,17 @@ describe("exception-safety", () => {
 
   it("multiple effects throw mid-flush: all execute, system stable after", () => {
     const errors: unknown[] = [];
-    const prev = setEffectErrorHandler((e) => { errors.push(e); });
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
     const s = signal(0);
     const results: number[] = [];
     for (let i = 0; i < 5; i++) {
       const idx = i;
       effect(() => {
-        if (s.value > 0 && idx % 2 === 0) { throw new Error(`err-${idx}`); }
+        if (s.value > 0 && idx % 2 === 0) {
+          throw new Error(`err-${idx}`);
+        }
         results.push(s.value + idx);
       });
     }
@@ -211,22 +237,31 @@ describe("exception-safety", () => {
   });
 
   it("exception in computed does not prevent other downstream effects from running", () => {
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
     const s = signal(1);
     let throwInC = false;
     const c = computed(() => {
-      if (throwInC) { throw new Error("c-err"); }
+      if (throwInC) {
+        throw new Error("c-err");
+      }
       return s.value;
     });
     const spy = vi.fn();
     // Effect that reads c (will catch error)
     effect(() => {
-      try { spy(c.value); }
-      catch { spy("error"); }
+      try {
+        spy(c.value);
+      } catch {
+        spy("error");
+      }
     });
     // Another independent effect
     const spy2 = vi.fn();
-    effect(() => { spy2(s.value); });
+    effect(() => {
+      spy2(s.value);
+    });
     spy.mockClear();
     spy2.mockClear();
     throwInC = true;
@@ -244,7 +279,9 @@ describe("dispose/leak", () => {
   it("disposed effect does not re-run on signal change", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(s.value); });
+    const dispose = effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     dispose();
     s.value = 1;
@@ -268,8 +305,13 @@ describe("dispose/leak", () => {
   it("F5: disposeEffect nulls _fn and _cleanup to release closures", () => {
     // We can't directly access internals, but we verify via WeakRef
     const s = signal(0);
-    const myFn = () => { void s.value; return myCleanup; };
-    const myCleanup = () => { /* cleanup */ };
+    const myFn = () => {
+      void s.value;
+      return myCleanup;
+    };
+    const myCleanup = () => {
+      /* cleanup */
+    };
     const fnRef = new WeakRef(myFn);
     const cleanupRef = new WeakRef(myCleanup);
     const dispose = effect(myFn);
@@ -284,7 +326,9 @@ describe("dispose/leak", () => {
   it("disposed effect mid-batch: not re-triggered", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(s.value); });
+    const dispose = effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
@@ -298,12 +342,20 @@ describe("dispose/leak", () => {
     const s = signal(0);
     const disposers: (() => void)[] = [];
     for (let i = 0; i < 100; i++) {
-      disposers.push(effect(() => { void s.value; }));
+      disposers.push(
+        effect(() => {
+          void s.value;
+        }),
+      );
     }
-    for (const d of disposers) { d(); }
+    for (const d of disposers) {
+      d();
+    }
     // Signal should have no targets after all effects disposed
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     s.value = 1;
     // Only the one remaining effect fires
@@ -316,7 +368,9 @@ describe("dispose/leak", () => {
 // ---------------------------------------------------------------------------
 describe("batch cycle-detection", () => {
   it("throws when effect re-triggers itself >100 times", () => {
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
     const s = signal(0);
     // This effect writes to s on every run, creating an infinite loop
     effect(() => {
@@ -331,7 +385,9 @@ describe("batch cycle-detection", () => {
     // Verify system is still usable after cycle detection
     const spy = vi.fn();
     const s2 = signal(0);
-    effect(() => { spy(s2.value); });
+    effect(() => {
+      spy(s2.value);
+    });
     spy.mockClear();
     s2.value = 42;
     expect(spy).toHaveBeenCalledWith(42);
@@ -340,7 +396,9 @@ describe("batch cycle-detection", () => {
   it("nested batches don't false-trigger cycle detection", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     batch(() => {
       batch(() => {
@@ -381,7 +439,9 @@ describe("peek", () => {
   it("signal peek() doesn't track", () => {
     const s = signal(1);
     const spy = vi.fn();
-    effect(() => { spy(s.peek()); });
+    effect(() => {
+      spy(s.peek());
+    });
     spy.mockClear();
     s.value = 2;
     expect(spy).not.toHaveBeenCalled();
@@ -408,7 +468,9 @@ describe("untracked in new core", () => {
     const spy = vi.fn();
     effect(() => {
       try {
-        untracked(() => { throw new Error("x"); });
+        untracked(() => {
+          throw new Error("x");
+        });
       } catch {
         // swallow
       }

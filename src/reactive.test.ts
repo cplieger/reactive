@@ -188,8 +188,12 @@ describe("batch", () => {
     expect.assertions(1);
     const s = signal(0);
     const results: number[] = [];
-    effect(() => { results.push(s.value); });
-    batch(() => { s.value = 42; });
+    effect(() => {
+      results.push(s.value);
+    });
+    batch(() => {
+      s.value = 42;
+    });
     // Effect should have already run synchronously
     expect(results).toEqual([0, 42]);
   });
@@ -595,9 +599,7 @@ describe("patchAttrs handler reconciliation", () => {
 
     patch(parent, newEl);
 
-    expect((parent.children[0] as unknown as Record<string, unknown>)["onmouseover"]).toBe(
-      handler,
-    );
+    expect((parent.children[0] as unknown as Record<string, unknown>)["onmouseover"]).toBe(handler);
   });
 
   it("updates handler reference on patch", () => {
@@ -1168,7 +1170,9 @@ describe("computed: diamond / glitch-freedom", () => {
     const a = signal(1);
     const isPositive = computed(() => a.value > 0);
     const spy = vi.fn();
-    effect(() => { spy(isPositive.value); });
+    effect(() => {
+      spy(isPositive.value);
+    });
     spy.mockClear();
     a.value = 2; // still > 0, isPositive still true
     expect(spy).not.toHaveBeenCalled();
@@ -1180,7 +1184,9 @@ describe("computed: diamond / glitch-freedom", () => {
     const right = computed(() => src.value * 3);
     const combined = computed(() => left.value + right.value);
     const spy = vi.fn();
-    effect(() => { spy(combined.value); });
+    effect(() => {
+      spy(combined.value);
+    });
     expect(spy).toHaveBeenCalledWith(5); // 2+3
     spy.mockClear();
     src.value = 2;
@@ -1193,9 +1199,14 @@ describe("computed: diamond / glitch-freedom", () => {
     const b = signal(0);
     const sum = computed(() => a.value + b.value);
     const spy = vi.fn();
-    effect(() => { spy(sum.value); });
+    effect(() => {
+      spy(sum.value);
+    });
     spy.mockClear();
-    batch(() => { a.value = 1; b.value = 1; });
+    batch(() => {
+      a.value = 1;
+      b.value = 1;
+    });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(2);
   });
@@ -1225,7 +1236,10 @@ describe("computed: cycle detection", () => {
 describe("computed: error caching", () => {
   it("caches thrown error and rethrows on subsequent reads", () => {
     let count = 0;
-    const c = computed(() => { count++; throw new Error("fail"); });
+    const c = computed(() => {
+      count++;
+      throw new Error("fail");
+    });
     expect(() => c.value).toThrow("fail");
     expect(() => c.value).toThrow("fail");
     expect(count).toBe(1); // fn only called once
@@ -1253,8 +1267,12 @@ describe("computed: error caching", () => {
       return s.value;
     });
     const errors: unknown[] = [];
-    const prev = setEffectErrorHandler((e) => { errors.push(e); });
-    effect(() => { void c.value; });
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
+    effect(() => {
+      void c.value;
+    });
     expect(errors.length).toBe(1);
     expect((errors[0] as Error).message).toBe("boom");
     setEffectErrorHandler(prev);
@@ -1268,7 +1286,9 @@ describe("computed: error caching", () => {
 describe("computed: setter throws", () => {
   it("throws when setting .value on computed", () => {
     const c = computed(() => 42);
-    expect(() => { (c as { value: number }).value = 99; }).toThrow("Cannot set a computed signal");
+    expect(() => {
+      (c as { value: number }).value = 99;
+    }).toThrow("Cannot set a computed signal");
   });
 });
 
@@ -1407,7 +1427,9 @@ describe("custom equality comparator", () => {
   it("signal with custom equals suppresses notification", () => {
     const s = signal({ x: 1, y: 2 }, { equals: (a, b) => a.x === b.x });
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     s.value = { x: 1, y: 99 }; // same x, different y — should NOT notify
     expect(spy).not.toHaveBeenCalled();
@@ -1416,7 +1438,9 @@ describe("custom equality comparator", () => {
   it("signal with custom equals allows notification when not equal", () => {
     const s = signal({ x: 1 }, { equals: (a, b) => a.x === b.x });
     const spy = vi.fn();
-    effect(() => { spy(s.value.x); });
+    effect(() => {
+      spy(s.value.x);
+    });
     spy.mockClear();
     s.value = { x: 2 };
     expect(spy).toHaveBeenCalledWith(2);
@@ -1425,7 +1449,9 @@ describe("custom equality comparator", () => {
   it("signal with equals: false always notifies", () => {
     const s = signal(1, { equals: false });
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     s.value = 1; // same value but equals:false → notify
     expect(spy).toHaveBeenCalledWith(1);
@@ -1437,7 +1463,9 @@ describe("custom equality comparator", () => {
       equals: (a, b) => a.rounded === b.rounded,
     });
     const spy = vi.fn();
-    effect(() => { spy(c.value.rounded); });
+    effect(() => {
+      spy(c.value.rounded);
+    });
     spy.mockClear();
     s.value = 1.5; // rounded still 1
     expect(spy).not.toHaveBeenCalled();
@@ -1449,7 +1477,9 @@ describe("custom equality comparator", () => {
     const s = signal(1);
     const c = computed(() => s.value > 0, { equals: false });
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     spy.mockClear();
     s.value = 2; // still true, but equals:false → notify
     expect(spy).toHaveBeenCalled();
@@ -1465,7 +1495,15 @@ describe("on", () => {
     const a = signal(1);
     const b = signal(10);
     const spy = vi.fn();
-    effect(on(() => a.value, (v) => { spy(v, b.value); return undefined; }));
+    effect(
+      on(
+        () => a.value,
+        (v) => {
+          spy(v, b.value);
+          return undefined;
+        },
+      ),
+    );
     expect(spy).toHaveBeenCalledWith(1, 10);
     spy.mockClear();
     b.value = 20; // not tracked
@@ -1478,7 +1516,12 @@ describe("on", () => {
     const a = signal(1);
     const b = signal(2);
     const spy = vi.fn();
-    effect(on([() => a.value, () => b.value], (vals) => { spy(vals); return undefined; }));
+    effect(
+      on([() => a.value, () => b.value], (vals) => {
+        spy(vals);
+        return undefined;
+      }),
+    );
     expect(spy).toHaveBeenCalledWith([1, 2]);
     spy.mockClear();
     a.value = 10;
@@ -1488,7 +1531,16 @@ describe("on", () => {
   it("defer option skips first execution", () => {
     const a = signal(1);
     const spy = vi.fn();
-    effect(on(() => a.value, (v) => { spy(v); return undefined; }, { defer: true }));
+    effect(
+      on(
+        () => a.value,
+        (v) => {
+          spy(v);
+          return undefined;
+        },
+        { defer: true },
+      ),
+    );
     expect(spy).not.toHaveBeenCalled();
     a.value = 2;
     expect(spy).toHaveBeenCalledWith(2);
@@ -1497,10 +1549,15 @@ describe("on", () => {
   it("provides prev value and prev result", () => {
     const s = signal(1);
     const results: unknown[] = [];
-    effect(on(() => s.value, (val, prev, prevResult) => {
-      results.push({ val, prev, prevResult });
-      return undefined;
-    }));
+    effect(
+      on(
+        () => s.value,
+        (val, prev, prevResult) => {
+          results.push({ val, prev, prevResult });
+          return undefined;
+        },
+      ),
+    );
     s.value = 2;
     s.value = 3;
     expect(results).toEqual([

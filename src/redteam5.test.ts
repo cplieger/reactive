@@ -20,9 +20,13 @@ describe("batch: cleanup throws on EVERY effect", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("20 effects all with throwing cleanups still all re-execute in batch", () => {
     const s = signal(0);
@@ -31,12 +35,18 @@ describe("batch: cleanup throws on EVERY effect", () => {
       const spy = spies[i]!;
       effect(() => {
         spy(s.value);
-        return () => { throw new Error(`batch-cleanup-${i}`); };
+        return () => {
+          throw new Error(`batch-cleanup-${i}`);
+        };
       });
     }
-    for (const spy of spies) {spy.mockClear();}
+    for (const spy of spies) {
+      spy.mockClear();
+    }
     errors.length = 0;
-    batch(() => { s.value = 42; });
+    batch(() => {
+      s.value = 42;
+    });
     for (const spy of spies) {
       expect(spy).toHaveBeenCalledWith(42);
     }
@@ -47,13 +57,25 @@ describe("batch: cleanup throws on EVERY effect", () => {
     const a = signal(0);
     const b = signal(0);
     const log: string[] = [];
-    effect(() => { log.push(`a:${a.value}`); return () => { throw new Error("clean-a"); }; });
-    effect(() => { log.push(`b:${b.value}`); return () => { throw new Error("clean-b"); }; });
+    effect(() => {
+      log.push(`a:${a.value}`);
+      return () => {
+        throw new Error("clean-a");
+      };
+    });
+    effect(() => {
+      log.push(`b:${b.value}`);
+      return () => {
+        throw new Error("clean-b");
+      };
+    });
     log.length = 0;
     errors.length = 0;
     batch(() => {
       a.value = 1;
-      batch(() => { b.value = 1; });
+      batch(() => {
+        b.value = 1;
+      });
     });
     expect(log).toContain("a:1");
     expect(log).toContain("b:1");
@@ -67,9 +89,13 @@ describe("batch: cleanup throws on EVERY effect", () => {
 describe("effectErrorHandler itself throws", () => {
   let prevHandler: EffectErrorHandler;
   beforeEach(() => {
-    prevHandler = setEffectErrorHandler(() => { /* swallow */ });
+    prevHandler = setEffectErrorHandler(() => {
+      /* swallow */
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("handler throw during batch doesn't prevent other effects from running", () => {
     let _handlerCalls = 0;
@@ -80,14 +106,31 @@ describe("effectErrorHandler itself throws", () => {
     const s = signal(0);
     const spy1 = vi.fn();
     const spy2 = vi.fn();
-    effect(() => { spy1(s.value); if (s.value > 0) {throw new Error("e1");} return undefined; });
-    effect(() => { spy2(s.value); return undefined; });
+    effect(() => {
+      spy1(s.value);
+      if (s.value > 0) {
+        throw new Error("e1");
+      }
+      return undefined;
+    });
+    effect(() => {
+      spy2(s.value);
+      return undefined;
+    });
     spy1.mockClear();
     spy2.mockClear();
     // The handler throwing should not make the system unusable
-    try { batch(() => { s.value = 1; }); } catch { /* swallow top-level */ }
+    try {
+      batch(() => {
+        s.value = 1;
+      });
+    } catch {
+      /* swallow top-level */
+    }
     // After resetting the handler, the system should work
-    setEffectErrorHandler(() => { /* swallow */ });
+    setEffectErrorHandler(() => {
+      /* swallow */
+    });
     spy1.mockClear();
     spy2.mockClear();
     s.value = 2;
@@ -96,17 +139,27 @@ describe("effectErrorHandler itself throws", () => {
   });
 
   it("handler throw during cleanup: effect still re-subscribes on next trigger", () => {
-    setEffectErrorHandler(() => { throw new Error("handler-ka-boom"); });
+    setEffectErrorHandler(() => {
+      throw new Error("handler-ka-boom");
+    });
     const s = signal(0);
     const spy = vi.fn();
     effect(() => {
       spy(s.value);
-      return () => { throw new Error("cleanup!"); };
+      return () => {
+        throw new Error("cleanup!");
+      };
     });
     spy.mockClear();
-    try { s.value = 1; } catch { /* handler throws propagate */ }
+    try {
+      s.value = 1;
+    } catch {
+      /* handler throws propagate */
+    }
     // Reset handler and verify effect is alive
-    setEffectErrorHandler(() => { /* swallow */ });
+    setEffectErrorHandler(() => {
+      /* swallow */
+    });
     spy.mockClear();
     s.value = 2;
     expect(spy).toHaveBeenCalledWith(2);
@@ -121,9 +174,13 @@ describe("dispose during flush", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("effect disposes itself during execution", () => {
     const s = signal(0);
@@ -132,7 +189,9 @@ describe("dispose during flush", () => {
     ref.dispose = effect(() => {
       const v = s.value;
       log.push(v);
-      if (v === 1) { ref.dispose?.(); }
+      if (v === 1) {
+        ref.dispose?.();
+      }
       return undefined;
     });
     s.value = 1;
@@ -149,7 +208,9 @@ describe("dispose during flush", () => {
     effect(() => {
       const v = s.value;
       logA.push(v);
-      if (v === 1) { refB.dispose?.(); }
+      if (v === 1) {
+        refB.dispose?.();
+      }
       return undefined;
     });
     refB.dispose = effect(() => {
@@ -170,8 +231,12 @@ describe("dispose during flush", () => {
     ref.dispose = effect(() => {
       const v = s.value;
       log.push(v);
-      if (v === 1) { ref.dispose?.(); }
-      return () => { throw new Error("self-dispose-cleanup"); };
+      if (v === 1) {
+        ref.dispose?.();
+      }
+      return () => {
+        throw new Error("self-dispose-cleanup");
+      };
     });
     s.value = 1;
     // Should not crash; cleanup error goes to handler
@@ -187,22 +252,32 @@ describe("computed equals throws during diamond update", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("equals throwing treated as changed — effect re-runs", () => {
     const s = signal(0);
     let throwOnEquals = false;
     const c = computed(() => s.value * 2, {
       equals: () => {
-        if (throwOnEquals) {throw new Error("equals-boom");}
+        if (throwOnEquals) {
+          throw new Error("equals-boom");
+        }
         return false; // always changed
       },
     });
     const log: number[] = [];
     effect(() => {
-      try { log.push(c.value); } catch { /* computed may throw */ }
+      try {
+        log.push(c.value);
+      } catch {
+        /* computed may throw */
+      }
       return undefined;
     });
     throwOnEquals = true;
@@ -215,7 +290,10 @@ describe("computed equals throws during diamond update", () => {
     const root = signal(0);
     let _throwCount = 0;
     const left = computed(() => root.value + 1, {
-      equals: () => { _throwCount++; throw new Error("left-equals"); },
+      equals: () => {
+        _throwCount++;
+        throw new Error("left-equals");
+      },
     });
     const right = computed(() => root.value + 2);
     const log: string[] = [];
@@ -229,7 +307,7 @@ describe("computed equals throws during diamond update", () => {
     });
     root.value = 10;
     // The effect should have re-run. Right branch should have correct value.
-    expect(log.some(s => s.includes("R=12"))).toBe(true);
+    expect(log.some((s) => s.includes("R=12"))).toBe(true);
   });
 });
 
@@ -246,7 +324,9 @@ describe("store effect cleanup throw (round-4 verification)", () => {
     console.error = vi.fn();
     store.effect(() => {
       log.push(`x=${store.get("x")},y=${store.get("y")}`);
-      return () => { throw new Error("store-cleanup"); };
+      return () => {
+        throw new Error("store-cleanup");
+      };
     });
     store.set("x", 1);
     store.set("y", 2);
@@ -265,11 +345,17 @@ describe("store effect cleanup throw (round-4 verification)", () => {
     for (const spy of spies) {
       store.effect(() => {
         spy(store.get("n"));
-        return () => { throw new Error("store-batch-cleanup"); };
+        return () => {
+          throw new Error("store-batch-cleanup");
+        };
       });
     }
-    for (const spy of spies) {spy.mockClear();}
-    store.batch(() => { store.set("n", 99); });
+    for (const spy of spies) {
+      spy.mockClear();
+    }
+    store.batch(() => {
+      store.set("n", 99);
+    });
     console.error = origErr;
     for (const spy of spies) {
       expect(spy).toHaveBeenCalledWith(99);
@@ -285,9 +371,13 @@ describe("deep dispose chains", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("effect creates child effects; disposing parent doesn't crash", () => {
     const s = signal(0);
@@ -297,12 +387,16 @@ describe("deep dispose chains", () => {
       // Create child effects each time parent runs
       const d = effect(() => {
         void s.value; // track
-        return () => { throw new Error(`child-cleanup-${v}`); };
+        return () => {
+          throw new Error(`child-cleanup-${v}`);
+        };
       });
       childDisposers.push(d);
       return () => {
         // Parent cleanup disposes children
-        for (const cd of childDisposers) {cd();}
+        for (const cd of childDisposers) {
+          cd();
+        }
         childDisposers.length = 0;
       };
     });
@@ -316,18 +410,27 @@ describe("deep dispose chains", () => {
     const s = signal(0);
     const disposers: (() => void)[] = [];
     for (let i = 0; i < 100; i++) {
-      disposers.push(effect(() => {
-        void s.value;
-        return () => { throw new Error(`deep-${i}`); };
-      }));
+      disposers.push(
+        effect(() => {
+          void s.value;
+          return () => {
+            throw new Error(`deep-${i}`);
+          };
+        }),
+      );
     }
     errors.length = 0;
     // Dispose all — no crashes, all errors routed to handler
-    for (const d of disposers) {d();}
+    for (const d of disposers) {
+      d();
+    }
     expect(errors.length).toBe(100);
     // Signal should still work after mass dispose
     const spy = vi.fn();
-    const d2 = effect(() => { spy(s.value); return undefined; });
+    const d2 = effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 999;
     expect(spy).toHaveBeenCalledWith(999);
@@ -341,9 +444,13 @@ describe("deep dispose chains", () => {
 describe("leak check after mass dispose", () => {
   let prevHandler: EffectErrorHandler;
   beforeEach(() => {
-    prevHandler = setEffectErrorHandler(() => { /* swallow */ });
+    prevHandler = setEffectErrorHandler(() => {
+      /* swallow */
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("disposed effects are not triggered by signal changes", () => {
     const s = signal(0);
@@ -352,15 +459,23 @@ describe("leak check after mass dispose", () => {
     for (let i = 0; i < 50; i++) {
       const spy = vi.fn();
       spies.push(spy);
-      disposers.push(effect(() => {
-        spy(s.value);
-        return () => { throw new Error(`leak-cleanup-${i}`); };
-      }));
+      disposers.push(
+        effect(() => {
+          spy(s.value);
+          return () => {
+            throw new Error(`leak-cleanup-${i}`);
+          };
+        }),
+      );
     }
     // Dispose all
-    for (const d of disposers) {d();}
+    for (const d of disposers) {
+      d();
+    }
     // Clear spies
-    for (const spy of spies) {spy.mockClear();}
+    for (const spy of spies) {
+      spy.mockClear();
+    }
     // Change signal — no disposed effects should fire
     s.value = 100;
     for (const spy of spies) {
@@ -378,13 +493,21 @@ describe("leak check after mass dispose", () => {
     for (let i = 0; i < 30; i++) {
       const spy = vi.fn();
       spies.push(spy);
-      disposers.push(store.effect(() => {
-        spy(store.get("k"));
-        return () => { throw new Error(`store-leak-${i}`); };
-      }));
+      disposers.push(
+        store.effect(() => {
+          spy(store.get("k"));
+          return () => {
+            throw new Error(`store-leak-${i}`);
+          };
+        }),
+      );
     }
-    for (const d of disposers) {d();}
-    for (const spy of spies) {spy.mockClear();}
+    for (const d of disposers) {
+      d();
+    }
+    for (const spy of spies) {
+      spy.mockClear();
+    }
     store.set("k", 999);
     console.error = origErr;
     for (const spy of spies) {
@@ -397,18 +520,25 @@ describe("leak check after mass dispose", () => {
     const c = computed(() => s.value * 3);
     const disposers: (() => void)[] = [];
     for (let i = 0; i < 50; i++) {
-      disposers.push(effect(() => {
-        void c.value;
-        return undefined;
-      }));
+      disposers.push(
+        effect(() => {
+          void c.value;
+          return undefined;
+        }),
+      );
     }
-    for (const d of disposers) {d();}
+    for (const d of disposers) {
+      d();
+    }
     // After disposing, computed should still work correctly
     s.value = 7;
     expect(c.value).toBe(21);
     // New effect on computed should work fine
     const spy = vi.fn();
-    const d = effect(() => { spy(c.value); return undefined; });
+    const d = effect(() => {
+      spy(c.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 8;
     expect(spy).toHaveBeenCalledWith(24);
@@ -424,16 +554,22 @@ describe("dispose re-entrancy guard", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("calling dispose multiple times is safe", () => {
     const s = signal(0);
     const spy = vi.fn();
     const dispose = effect(() => {
       spy(s.value);
-      return () => { throw new Error("multi-dispose"); };
+      return () => {
+        throw new Error("multi-dispose");
+      };
     });
     dispose();
     dispose();
@@ -449,7 +585,9 @@ describe("dispose re-entrancy guard", () => {
     ref.dispose = effect(() => {
       const v = s.value;
       log.push(v);
-      if (v === 5) { ref.dispose?.(); }
+      if (v === 5) {
+        ref.dispose?.();
+      }
       return undefined;
     });
     s.value = 5;
@@ -466,16 +604,22 @@ describe("flushSync with errors", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("flushSync after batch with throwing effects", () => {
     const s = signal(0);
     const spy = vi.fn();
     effect(() => {
       spy(s.value);
-      return () => { throw new Error("flush-cleanup"); };
+      return () => {
+        throw new Error("flush-cleanup");
+      };
     });
     spy.mockClear();
     batch(() => {
@@ -497,16 +641,22 @@ describe("stress: rapid changes with computed + effect + cleanup throws", () => 
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("1000 rapid writes with cleanup-throwing effect", () => {
     const s = signal(0);
     let lastSeen = -1;
     effect(() => {
       lastSeen = s.value;
-      return () => { throw new Error("rapid-cleanup"); };
+      return () => {
+        throw new Error("rapid-cleanup");
+      };
     });
     errors.length = 0;
     for (let i = 1; i <= 1000; i++) {
@@ -523,12 +673,16 @@ describe("stress: rapid changes with computed + effect + cleanup throws", () => 
     effect(() => {
       lastSeen = s.value;
       runCount++;
-      return () => { throw new Error("batch-rapid-cleanup"); };
+      return () => {
+        throw new Error("batch-rapid-cleanup");
+      };
     });
     runCount = 0;
     errors.length = 0;
     batch(() => {
-      for (let i = 1; i <= 1000; i++) {s.value = i;}
+      for (let i = 1; i <= 1000; i++) {
+        s.value = i;
+      }
     });
     expect(lastSeen).toBe(1000);
     // Should only run once in batch (single flush)

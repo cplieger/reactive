@@ -23,7 +23,9 @@ import type { EffectErrorHandler } from "./index.js";
 describe("round-1/2 fix verification", () => {
   let prevHandler: EffectErrorHandler;
   beforeEach(() => {
-    prevHandler = setEffectErrorHandler(() => { /* swallow */ });
+    prevHandler = setEffectErrorHandler(() => {
+      /* swallow */
+    });
   });
   afterEach(() => {
     setEffectErrorHandler(prevHandler);
@@ -32,13 +34,31 @@ describe("round-1/2 fix verification", () => {
   it("drainPending try/finally: flushing resets even with cascading throws", () => {
     const s = signal(0);
     // Create 3 effects that all throw
-    effect(() => { if (s.value > 0) {throw new Error("e1");} return undefined; });
-    effect(() => { if (s.value > 0) {throw new Error("e2");} return undefined; });
-    effect(() => { if (s.value > 0) {throw new Error("e3");} return undefined; });
+    effect(() => {
+      if (s.value > 0) {
+        throw new Error("e1");
+      }
+      return undefined;
+    });
+    effect(() => {
+      if (s.value > 0) {
+        throw new Error("e2");
+      }
+      return undefined;
+    });
+    effect(() => {
+      if (s.value > 0) {
+        throw new Error("e3");
+      }
+      return undefined;
+    });
     s.value = 1;
     // System must still work
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 2;
     expect(spy).toHaveBeenCalledWith(2);
@@ -49,7 +69,9 @@ describe("round-1/2 fix verification", () => {
     let cleanups = 0;
     const dispose = effect(() => {
       void s.value;
-      return () => { cleanups++; };
+      return () => {
+        cleanups++;
+      };
     });
     dispose();
     dispose();
@@ -62,7 +84,9 @@ describe("round-1/2 fix verification", () => {
     let cleanups = 0;
     effect(() => {
       void s.value;
-      return () => { cleanups++; };
+      return () => {
+        cleanups++;
+      };
     });
     s.value = 1;
     s.value = 2;
@@ -95,7 +119,10 @@ describe("pathological graphs", () => {
     }
     const leaf = nodes[0]!;
     const spy = vi.fn();
-    effect(() => { spy(leaf.value); return undefined; });
+    effect(() => {
+      spy(leaf.value);
+      return undefined;
+    });
     spy.mockClear();
     root.value = 1;
     expect(spy).toHaveBeenCalledTimes(1);
@@ -105,9 +132,14 @@ describe("pathological graphs", () => {
     const s = signal(0);
     const spies = Array.from({ length: 100 }, () => vi.fn());
     for (const spy of spies) {
-      effect(() => { spy(s.value); return undefined; });
+      effect(() => {
+        spy(s.value);
+        return undefined;
+      });
     }
-    for (const spy of spies) {spy.mockClear();}
+    for (const spy of spies) {
+      spy.mockClear();
+    }
     s.value = 1;
     for (const spy of spies) {
       expect(spy).toHaveBeenCalledTimes(1);
@@ -119,10 +151,15 @@ describe("pathological graphs", () => {
     const signals = Array.from({ length: 50 }, (_, i) => signal(i));
     const sum = computed(() => signals.reduce((acc, s) => acc + s.value, 0));
     const spy = vi.fn();
-    effect(() => { spy(sum.value); return undefined; });
+    effect(() => {
+      spy(sum.value);
+      return undefined;
+    });
     spy.mockClear();
     batch(() => {
-      for (const s of signals) {s.value = s.peek() + 1;}
+      for (const s of signals) {
+        s.value = s.peek() + 1;
+      }
     });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenCalledWith(1275); // original sum(0..49)=1225, each +1 → sum(1..50)=1275
@@ -146,7 +183,9 @@ describe("exception in every callback type", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
   afterEach(() => {
     setEffectErrorHandler(prevHandler);
@@ -157,7 +196,9 @@ describe("exception in every callback type", () => {
     const values: number[] = [];
     effect(() => {
       values.push(s.value);
-      return () => { throw new Error("cleanup boom"); };
+      return () => {
+        throw new Error("cleanup boom");
+      };
     });
     s.value = 1;
     s.value = 2;
@@ -170,7 +211,9 @@ describe("exception in every callback type", () => {
   it("exception in computed fn is cached and re-thrown on read", () => {
     const s = signal(0);
     const c = computed(() => {
-      if (s.value === 1) {throw new Error("computed boom");}
+      if (s.value === 1) {
+        throw new Error("computed boom");
+      }
       return s.value * 2;
     });
     expect(c.value).toBe(0);
@@ -184,16 +227,21 @@ describe("exception in every callback type", () => {
   it("exception in subscribe callback is caught by error handler", () => {
     const s = signal(0);
     subscribe(s, (v) => {
-      if (v === 1) {throw new Error("subscribe boom");}
+      if (v === 1) {
+        throw new Error("subscribe boom");
+      }
     });
     s.value = 1;
-    expect(errors.some(e => (e as Error).message === "subscribe boom")).toBe(true);
+    expect(errors.some((e) => (e as Error).message === "subscribe boom")).toBe(true);
   });
 
   it("exception in batch fn propagates but effects still flush", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     expect(() => {
       batch(() => {
@@ -210,13 +258,15 @@ describe("exception in every callback type", () => {
     const fn = vi.fn();
     effect(() => {
       const v = s.value;
-      if (v === 1) {throw new Error("on body boom");}
+      if (v === 1) {
+        throw new Error("on body boom");
+      }
       fn(v);
       return undefined;
     });
     fn.mockClear();
     s.value = 1;
-    expect(errors.some(e => (e as Error).message === "on body boom")).toBe(true);
+    expect(errors.some((e) => (e as Error).message === "on body boom")).toBe(true);
     // Recovery
     s.value = 2;
     expect(fn).toHaveBeenCalledWith(2);
@@ -232,11 +282,18 @@ describe("dispose ordering", () => {
     const s = signal(0);
     const order: string[] = [];
     const disposers = Array.from({ length: 5 }, (_, i) =>
-      effect(() => { order.push(`e${i}:${s.value}`); return () => { order.push(`c${i}`); }; })
+      effect(() => {
+        order.push(`e${i}:${s.value}`);
+        return () => {
+          order.push(`c${i}`);
+        };
+      }),
     );
     order.length = 0;
     // Dispose in reverse
-    for (let i = 4; i >= 0; i--) {disposers[i]!();}
+    for (let i = 4; i >= 0; i--) {
+      disposers[i]!();
+    }
     expect(order).toEqual(["c4", "c3", "c2", "c1", "c0"]);
     // No effects should fire
     order.length = 0;
@@ -249,16 +306,33 @@ describe("dispose ordering", () => {
     const spy = vi.fn();
     const disposers: (() => void)[] = [];
     // Effect 0 disposes effects 1 and 2 when triggered
-    disposers.push(effect(() => {
-      if (s.value === 1) {
-        disposers[1]?.();
-        disposers[2]?.();
-      }
-      return undefined;
-    }));
-    disposers.push(effect(() => { spy("e1:" + s.value); return undefined; }));
-    disposers.push(effect(() => { spy("e2:" + s.value); return undefined; }));
-    disposers.push(effect(() => { spy("e3:" + s.value); return undefined; }));
+    disposers.push(
+      effect(() => {
+        if (s.value === 1) {
+          disposers[1]?.();
+          disposers[2]?.();
+        }
+        return undefined;
+      }),
+    );
+    disposers.push(
+      effect(() => {
+        spy("e1:" + s.value);
+        return undefined;
+      }),
+    );
+    disposers.push(
+      effect(() => {
+        spy("e2:" + s.value);
+        return undefined;
+      }),
+    );
+    disposers.push(
+      effect(() => {
+        spy("e3:" + s.value);
+        return undefined;
+      }),
+    );
     spy.mockClear();
     s.value = 1;
     // e3 should still fire; e1 and e2 may or may not depending on order
@@ -275,13 +349,23 @@ describe("memory leak after mass dispose", () => {
     const s = signal(0);
     const disposers: (() => void)[] = [];
     for (let i = 0; i < 1000; i++) {
-      disposers.push(effect(() => { void s.value; return undefined; }));
+      disposers.push(
+        effect(() => {
+          void s.value;
+          return undefined;
+        }),
+      );
     }
     // Dispose all
-    for (const d of disposers) {d();}
+    for (const d of disposers) {
+      d();
+    }
     // Verify: setting signal should not trigger anything
     const spy = vi.fn();
-    const d2 = effect(() => { spy(s.value); return undefined; });
+    const d2 = effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 1;
     expect(spy).toHaveBeenCalledTimes(1);
@@ -295,13 +379,23 @@ describe("memory leak after mass dispose", () => {
     for (let i = 0; i < 100; i++) {
       const c = computed(() => s.value + i);
       computeds.push(c);
-      disposers.push(effect(() => { void c.value; return undefined; }));
+      disposers.push(
+        effect(() => {
+          void c.value;
+          return undefined;
+        }),
+      );
     }
     // Dispose all effects (computeds become lazy/unsubscribed)
-    for (const d of disposers) {d();}
+    for (const d of disposers) {
+      d();
+    }
     // Signal update should not trigger any computation
     const spy = vi.fn();
-    const d2 = effect(() => { spy(s.value); return undefined; });
+    const d2 = effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 99;
     expect(spy).toHaveBeenCalledTimes(1);
@@ -320,7 +414,10 @@ describe("batch + computed + effect interleaving", () => {
     const b = signal(2);
     const sum = computed(() => a.value + b.value);
     const values: number[] = [];
-    effect(() => { values.push(sum.value); return undefined; });
+    effect(() => {
+      values.push(sum.value);
+      return undefined;
+    });
     values.length = 0;
     batch(() => {
       a.value = 10;
@@ -333,7 +430,10 @@ describe("batch + computed + effect interleaving", () => {
   it("nested batch: inner batch does not flush", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     batch(() => {
       batch(() => {
@@ -354,11 +454,16 @@ describe("batch + computed + effect interleaving", () => {
     effect(() => {
       if (s.value === 1) {
         // Create new effect during flush
-        effect(() => { inner(s.value); return undefined; });
+        effect(() => {
+          inner(s.value);
+          return undefined;
+        });
       }
       return undefined;
     });
-    batch(() => { s.value = 1; });
+    batch(() => {
+      s.value = 1;
+    });
     expect(inner).toHaveBeenCalledWith(1);
   });
 
@@ -367,7 +472,10 @@ describe("batch + computed + effect interleaving", () => {
     const b = signal(0);
     const c = computed(() => a.value + b.value);
     const spy = vi.fn();
-    effect(() => { spy(c.value); return undefined; });
+    effect(() => {
+      spy(c.value);
+      return undefined;
+    });
     spy.mockClear();
     batch(() => {
       a.value = 1;
@@ -404,7 +512,10 @@ describe("reconcile fuzz", () => {
     const items: { id: string; v: number }[] = [];
     let nextId = 0;
     let seed = 42;
-    const rng = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 0x100000000; };
+    const rng = () => {
+      seed = (seed * 1664525 + 1013904223) >>> 0;
+      return seed / 0x100000000;
+    };
 
     for (let iter = 0; iter < 50; iter++) {
       const action = rng();
@@ -420,7 +531,9 @@ describe("reconcile fuzz", () => {
         // Swap two random
         const i = Math.floor(rng() * items.length);
         let j = Math.floor(rng() * items.length);
-        if (j === i) {j = (j + 1) % items.length;}
+        if (j === i) {
+          j = (j + 1) % items.length;
+        }
         [items[i], items[j]] = [items[j]!, items[i]!];
       }
       reconcile(parent, items, spec);
@@ -462,13 +575,20 @@ describe("reconcile fuzz", () => {
 // ---------------------------------------------------------------------------
 
 describe("synchronous semantics (fake timers)", () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it("signal write + effect is fully synchronous, no pending microtasks", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 1;
     // Should already have fired - no need to advance timers
@@ -478,9 +598,14 @@ describe("synchronous semantics (fake timers)", () => {
   it("batch flush is synchronous", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
-    batch(() => { s.value = 42; });
+    batch(() => {
+      s.value = 42;
+    });
     expect(spy).toHaveBeenCalledWith(42);
   });
 
@@ -519,8 +644,12 @@ describe("untracked edge cases", () => {
     const spy = vi.fn();
     effect(() => {
       try {
-        untracked(() => { throw new Error("boom"); });
-      } catch { /* swallow */ }
+        untracked(() => {
+          throw new Error("boom");
+        });
+      } catch {
+        /* swallow */
+      }
       spy(s.value); // should still be tracked
       return undefined;
     });
@@ -556,10 +685,15 @@ describe("store: batch + effect + computed interleaving", () => {
     store.set("x", 0);
     const spy = vi.fn();
     store.effect(() => {
-      if (store.get("x") === 1) {throw new Error("store effect boom");}
+      if (store.get("x") === 1) {
+        throw new Error("store effect boom");
+      }
       return undefined;
     });
-    store.effect(() => { spy(store.get("x")); return undefined; });
+    store.effect(() => {
+      spy(store.get("x"));
+      return undefined;
+    });
     spy.mockClear();
     // The throwing effect will console.error but shouldn't prevent spy effect
     const origError = console.error;
@@ -585,7 +719,10 @@ describe("adversarial equals", () => {
       },
     });
     const spy = vi.fn();
-    effect(() => { spy(b.value); return undefined; });
+    effect(() => {
+      spy(b.value);
+      return undefined;
+    });
     spy.mockClear();
     b.value = 1;
     expect(spy).toHaveBeenCalledWith(1);
@@ -594,7 +731,10 @@ describe("adversarial equals", () => {
   it("equals returning false always causes notification", () => {
     const s = signal(0, { equals: false });
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 0; // same value but equals=false means always notify
     expect(spy).toHaveBeenCalledWith(0);

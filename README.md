@@ -22,7 +22,16 @@ npm i @cplieger/reactive
 ## Usage
 
 ```typescript
-import { signal, effect, batch, computed, untracked, subscribe, isSignal, isComputed } from "@cplieger/reactive";
+import {
+  signal,
+  effect,
+  batch,
+  computed,
+  untracked,
+  subscribe,
+  isSignal,
+  isComputed,
+} from "@cplieger/reactive";
 
 const count = signal(0);
 const doubled = computed(() => count.value * 2);
@@ -50,7 +59,7 @@ const dispose = subscribe(count, (v) => console.log("count changed:", v));
 dispose();
 
 // Type guards
-isSignal(count);    // true
+isSignal(count); // true
 isComputed(doubled); // true
 ```
 
@@ -93,18 +102,18 @@ isComputed(doubled); // true
 
 The following features are intentionally NOT implemented:
 
-| Feature | Reason |
-|---------|--------|
-| **Effect ownership tree / `createRoot`** | Consumers manage disposal explicitly. Adding ownership adds ~150 LOC of complexity and changes the mental model. |
-| **Nested effect auto-disposal** | Each effect is independent and returns its own dispose function. Compose with arrays or helper functions. |
-| **Lazy activation / `onMount` lifecycle** | Signals are always active. Resource management is the consumer's responsibility. |
+| Feature                                       | Reason                                                                                                             |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| **Effect ownership tree / `createRoot`**      | Consumers manage disposal explicitly. Adding ownership adds ~150 LOC of complexity and changes the mental model.   |
+| **Nested effect auto-disposal**               | Each effect is independent and returns its own dispose function. Compose with arrays or helper functions.          |
+| **Lazy activation / `onMount` lifecycle**     | Signals are always active. Resource management is the consumer's responsibility.                                   |
 | **`Signal.subtle.Watcher` / notify-on-dirty** | This library IS the framework layer. The Watcher pattern is for frameworks that sit on top of a signals primitive. |
-| **Introspection APIs** | Dev-tools concern. Not needed for production. |
-| **Explicit computed disposal** | Computed signals are GC'd when unreferenced. No explicit teardown needed. |
-| **SSR / server-side isolation** | Client-side library. Server usage should instantiate fresh signal graphs per request. |
-| **Async signals / resources** | Out of scope. Use effects + manual signal writes for async data loading. |
-| **Transactions** | Framework-level concern. Not a signals primitive. |
-| **Custom scheduler / `setScheduler()`** | Batch is synchronous. No scheduler needed. |
+| **Introspection APIs**                        | Dev-tools concern. Not needed for production.                                                                      |
+| **Explicit computed disposal**                | Computed signals are GC'd when unreferenced. No explicit teardown needed.                                          |
+| **SSR / server-side isolation**               | Client-side library. Server usage should instantiate fresh signal graphs per request.                              |
+| **Async signals / resources**                 | Out of scope. Use effects + manual signal writes for async data loading.                                           |
+| **Transactions**                              | Framework-level concern. Not a signals primitive.                                                                  |
+| **Custom scheduler / `setScheduler()`**       | Batch is synchronous. No scheduler needed.                                                                         |
 
 ## License
 

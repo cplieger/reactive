@@ -2,14 +2,7 @@
 // RED-TEAM round-7 — final convergence verification
 // Per-callback-site throw-safety + pathological graphs (diamonds, chains, fan-in/out)
 import { describe, it, expect, vi } from "vitest";
-import {
-  signal,
-  effect,
-  batch,
-  computed,
-  setEffectErrorHandler,
-  flushSync,
-} from "./index.js";
+import { signal, effect, batch, computed, setEffectErrorHandler, flushSync } from "./index.js";
 import { createStore } from "./store.js";
 import { reconcile, KEY_ATTR } from "./reconcile.js";
 
@@ -35,7 +28,9 @@ describe("R7: effect body throw — pathological graphs", () => {
       const log: string[] = [];
       // L effect throws
       effect(() => {
-        if (left.value > 1) {throw new Error("L-boom");}
+        if (left.value > 1) {
+          throw new Error("L-boom");
+        }
         return undefined;
       });
       // Join effect reads both
@@ -62,7 +57,9 @@ describe("R7: effect body throw — pathological graphs", () => {
       spies.forEach((spy, i) => {
         effect(() => {
           spy(s.value);
-          if (s.value > 0) {throw new Error(`fan-${i}`);}
+          if (s.value > 0) {
+            throw new Error(`fan-${i}`);
+          }
           return undefined;
         });
       });
@@ -86,14 +83,19 @@ describe("R7: effect body throw — pathological graphs", () => {
       const c1 = computed(() => s.value * 2);
       let throwInC2 = false;
       const c2 = computed(() => {
-        if (throwInC2) {throw new Error("c2-chain");}
+        if (throwInC2) {
+          throw new Error("c2-chain");
+        }
         return c1.value + 1;
       });
       const c3 = computed(() => c2.value + 10);
       const log: string[] = [];
       effect(() => {
-        try { log.push(`v=${c3.value}`); }
-        catch { log.push("err"); }
+        try {
+          log.push(`v=${c3.value}`);
+        } catch {
+          log.push("err");
+        }
         return undefined;
       });
       log.length = 0;
@@ -115,12 +117,18 @@ describe("R7: effect body throw — pathological graphs", () => {
       const spy = vi.fn();
       effect(() => {
         spy(sum.value);
-        if (sum.value > 10) {throw new Error("fan-in-boom");}
+        if (sum.value > 10) {
+          throw new Error("fan-in-boom");
+        }
         return undefined;
       });
       spy.mockClear();
       errors.length = 0;
-      batch(() => { sigs.forEach((s) => { s.value = 10; }); });
+      batch(() => {
+        sigs.forEach((s) => {
+          s.value = 10;
+        });
+      });
       expect(errors.length).toBe(1);
       expect(spy).toHaveBeenCalledWith(50);
       // Still subscribes
@@ -143,8 +151,12 @@ describe("R7: effect cleanup throw — pathological", () => {
       effect(() => {
         void s.value;
         throwCount++;
-        if (throwCount > 1) {throw new Error("body-throw");}
-        return () => { throw new Error("cleanup-throw"); };
+        if (throwCount > 1) {
+          throw new Error("body-throw");
+        }
+        return () => {
+          throw new Error("cleanup-throw");
+        };
       });
       errors.length = 0;
       s.value = 1; // triggers cleanup (throws) then body (throws)
@@ -164,7 +176,9 @@ describe("R7: effect cleanup throw — pathological", () => {
       const spy = vi.fn();
       const dispose = effect(() => {
         spy(s.value);
-        return () => { throw new Error("dispose-cleanup"); };
+        return () => {
+          throw new Error("dispose-cleanup");
+        };
       });
       spy.mockClear();
       errors.length = 0;
@@ -185,17 +199,26 @@ describe("R7: computed fn throw — pathological graphs", () => {
     withHandler(() => {
       const root = signal(0);
       const cL = computed(() => {
-        if (root.value > 0) {throw new Error("cL");}
+        if (root.value > 0) {
+          throw new Error("cL");
+        }
         return root.value;
       });
       const cR = computed(() => root.value * 10);
       const join = computed(() => {
         let l: number;
-        try { l = cL.value; } catch { l = -1; }
+        try {
+          l = cL.value;
+        } catch {
+          l = -1;
+        }
         return l + cR.value;
       });
       const log: number[] = [];
-      effect(() => { log.push(join.value); return undefined; });
+      effect(() => {
+        log.push(join.value);
+        return undefined;
+      });
       log.length = 0;
       root.value = 1;
       expect(log).toContain(-1 + 10); // -1 + 10 = 9
@@ -213,12 +236,18 @@ describe("R7: computed fn throw — pathological graphs", () => {
       let shouldThrow = false;
       const c = computed(() => {
         const av = a.value; // subscribes to a
-        if (shouldThrow) {throw new Error("mid-track");}
+        if (shouldThrow) {
+          throw new Error("mid-track");
+        }
         return av + b.value; // subscribes to b only if no throw
       });
       const spy = vi.fn();
       effect(() => {
-        try { spy(c.value); } catch { spy("err"); }
+        try {
+          spy(c.value);
+        } catch {
+          spy("err");
+        }
         return undefined;
       });
       expect(spy).toHaveBeenCalledWith(3);
@@ -248,10 +277,18 @@ describe("R7: computed equals comparator throw", () => {
       const s = signal(0);
       let eqThrow = false;
       const c = computed(() => s.value * 2, {
-        equals: () => { if (eqThrow) {throw new Error("eq-boom");} return false; },
+        equals: () => {
+          if (eqThrow) {
+            throw new Error("eq-boom");
+          }
+          return false;
+        },
       });
       const spy = vi.fn();
-      effect(() => { spy(c.value); return undefined; });
+      effect(() => {
+        spy(c.value);
+        return undefined;
+      });
       spy.mockClear();
       eqThrow = true;
       s.value = 1;
@@ -275,14 +312,30 @@ describe("R7: computed equals comparator throw", () => {
 describe("R7: signal equals throw", () => {
   it("equals throws inside deeply nested batch — batchDepth restored", () => {
     const s = signal(0, {
-      equals: (_a, b) => { if (b === 100) {throw new Error("deep-eq");} return _a === b; },
+      equals: (_a, b) => {
+        if (b === 100) {
+          throw new Error("deep-eq");
+        }
+        return _a === b;
+      },
     });
     const spy = vi.fn();
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
-    effect(() => { spy(s.value); return undefined; });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     expect(() => {
-      batch(() => batch(() => batch(() => { s.value = 100; })));
+      batch(() =>
+        batch(() =>
+          batch(() => {
+            s.value = 100;
+          }),
+        ),
+      );
     }).toThrow("deep-eq");
     // batchDepth must be 0 — next write must flush immediately
     spy.mockClear();
@@ -293,13 +346,25 @@ describe("R7: signal equals throw", () => {
 
   it("equals throws — does not corrupt signal value or subscriber set", () => {
     const s = signal(42, {
-      equals: (_a, b) => { if (b === 0) {throw new Error("zero-eq");} return _a === b; },
+      equals: (_a, b) => {
+        if (b === 0) {
+          throw new Error("zero-eq");
+        }
+        return _a === b;
+      },
     });
     const spy = vi.fn();
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
-    effect(() => { spy(s.value); return undefined; });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
-    expect(() => { s.value = 0; }).toThrow("zero-eq");
+    expect(() => {
+      s.value = 0;
+    }).toThrow("zero-eq");
     expect(s.peek()).toBe(42); // value unchanged
     spy.mockClear();
     s.value = 99;
@@ -318,7 +383,9 @@ describe("R7: store subscriber throw", () => {
     store.set("x", 0);
     const spy1 = vi.fn();
     const spy2 = vi.fn();
-    store.subscribe("x", () => { throw new Error("sub-throw"); });
+    store.subscribe("x", () => {
+      throw new Error("sub-throw");
+    });
     store.subscribe("x", spy1);
     store.subscribe("x", spy2);
     store.set("x", 5);
@@ -330,7 +397,9 @@ describe("R7: store subscriber throw", () => {
     const store = createStore<{ a: number; b: number }>();
     store.set("a", 0);
     store.set("b", 0);
-    store.subscribe("a", () => { throw new Error("a-sub"); });
+    store.subscribe("a", () => {
+      throw new Error("a-sub");
+    });
     const spy = vi.fn();
     store.subscribe("b", spy);
     store.batch(() => {
@@ -354,15 +423,26 @@ describe("R7: reconcile callbacks throw — no hang", () => {
     const parent = document.createElement("div");
     expect(() => {
       reconcile(parent, [{ id: 1 }], {
-        key: () => { throw new Error("key-throw"); },
-        mount: (item) => { const el = document.createElement("div"); el.textContent = String(item); return el; },
+        key: () => {
+          throw new Error("key-throw");
+        },
+        mount: (item) => {
+          const el = document.createElement("div");
+          el.textContent = String(item);
+          return el;
+        },
       });
     }).toThrow("key-throw");
     // Reactive system still works after
     const s = signal(0);
     const spy = vi.fn();
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
-    effect(() => { spy(s.value); return undefined; });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 1;
     expect(spy).toHaveBeenCalledWith(1);
@@ -374,13 +454,20 @@ describe("R7: reconcile callbacks throw — no hang", () => {
     expect(() => {
       reconcile(parent, [{ id: 1 }], {
         key: (item) => String(item.id),
-        mount: () => { throw new Error("mount-throw"); },
+        mount: () => {
+          throw new Error("mount-throw");
+        },
       });
     }).toThrow("mount-throw");
     const s = signal(0);
     const spy = vi.fn();
-    const prev = setEffectErrorHandler(() => { /* swallow */ });
-    effect(() => { spy(s.value); return undefined; });
+    const prev = setEffectErrorHandler(() => {
+      /* swallow */
+    });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 1;
     expect(spy).toHaveBeenCalledWith(1);
@@ -391,15 +478,27 @@ describe("R7: reconcile callbacks throw — no hang", () => {
     const parent = document.createElement("div");
     reconcile(parent, [{ id: 1, v: "a" }], {
       key: (item) => String(item.id),
-      mount: (item) => { const el = document.createElement("div"); el.setAttribute(KEY_ATTR, String(item.id)); return el; },
-      update: () => { throw new Error("update-throw"); },
+      mount: (item) => {
+        const el = document.createElement("div");
+        el.setAttribute(KEY_ATTR, String(item.id));
+        return el;
+      },
+      update: () => {
+        throw new Error("update-throw");
+      },
     });
     // Now update
     expect(() => {
       reconcile(parent, [{ id: 1, v: "b" }], {
         key: (item) => String(item.id),
-        mount: (item) => { const el = document.createElement("div"); el.setAttribute(KEY_ATTR, String(item.id)); return el; },
-        update: () => { throw new Error("update-throw"); },
+        mount: (item) => {
+          const el = document.createElement("div");
+          el.setAttribute(KEY_ATTR, String(item.id));
+          return el;
+        },
+        update: () => {
+          throw new Error("update-throw");
+        },
       });
     }).toThrow("update-throw");
   });
@@ -408,8 +507,14 @@ describe("R7: reconcile callbacks throw — no hang", () => {
     const parent = document.createElement("div");
     const spec = {
       key: (item: { id: number }) => String(item.id),
-      mount: (item: { id: number }) => { const el = document.createElement("div"); el.setAttribute(KEY_ATTR, String(item.id)); return el; },
-      onRemove: () => { throw new Error("onRemove-throw"); },
+      mount: (item: { id: number }) => {
+        const el = document.createElement("div");
+        el.setAttribute(KEY_ATTR, String(item.id));
+        return el;
+      },
+      onRemove: () => {
+        throw new Error("onRemove-throw");
+      },
     };
     reconcile(parent, [{ id: 1 }, { id: 2 }], spec);
     expect(() => {
@@ -428,7 +533,9 @@ describe("R7: global invariants after throw storms", () => {
       let shouldThrow = true;
       effect(() => {
         void s.value;
-        if (shouldThrow) {throw new Error("storm");}
+        if (shouldThrow) {
+          throw new Error("storm");
+        }
         return undefined;
       });
       for (let i = 1; i <= 100; i++) {
@@ -438,7 +545,10 @@ describe("R7: global invariants after throw storms", () => {
       // Final state — effect should have run (shouldThrow=false for odd=100? no, 100%2=0 so throws)
       shouldThrow = false;
       const spy = vi.fn();
-      effect(() => { spy(s.value); return undefined; });
+      effect(() => {
+        spy(s.value);
+        return undefined;
+      });
       spy.mockClear();
       s.value = 999;
       expect(spy).toHaveBeenCalledWith(999);
@@ -448,14 +558,24 @@ describe("R7: global invariants after throw storms", () => {
   it("flushSync after throw storm — works (flushing not stuck)", () => {
     withHandler(() => {
       const s = signal(0);
-      effect(() => { if (s.value > 0) {throw new Error("fs");} return undefined; });
+      effect(() => {
+        if (s.value > 0) {
+          throw new Error("fs");
+        }
+        return undefined;
+      });
       s.value = 1;
       // If flushing were stuck, this would be a no-op
       const s2 = signal(0);
       const spy = vi.fn();
-      effect(() => { spy(s2.value); return undefined; });
+      effect(() => {
+        spy(s2.value);
+        return undefined;
+      });
       spy.mockClear();
-      batch(() => { s2.value = 42; });
+      batch(() => {
+        s2.value = 42;
+      });
       flushSync();
       expect(spy).toHaveBeenCalledWith(42);
     });
@@ -477,7 +597,9 @@ describe("R7: global invariants after throw storms", () => {
       }
     });
     effect(() => {
-      if (s.value > 0 && s.value < 10) {throw new Error("loop-test");}
+      if (s.value > 0 && s.value < 10) {
+        throw new Error("loop-test");
+      }
       return undefined;
     });
     s.value = 1;
@@ -497,23 +619,37 @@ describe("R7: computed+effect interaction during batch flush throw", () => {
       const s = signal(0);
       const c1 = computed(() => s.value + 1);
       const c2 = computed(() => {
-        if (s.value > 0) {throw new Error("c2-batch");}
+        if (s.value > 0) {
+          throw new Error("c2-batch");
+        }
         return s.value + 2;
       });
       const c3 = computed(() => s.value + 3);
       const log1: number[] = [];
       const log2: string[] = [];
       const log3: number[] = [];
-      effect(() => { log1.push(c1.value); return undefined; });
       effect(() => {
-        try { log2.push(`v=${c2.value}`); } catch { log2.push("err"); }
+        log1.push(c1.value);
         return undefined;
       });
-      effect(() => { log3.push(c3.value); return undefined; });
+      effect(() => {
+        try {
+          log2.push(`v=${c2.value}`);
+        } catch {
+          log2.push("err");
+        }
+        return undefined;
+      });
+      effect(() => {
+        log3.push(c3.value);
+        return undefined;
+      });
       log1.length = 0;
       log2.length = 0;
       log3.length = 0;
-      batch(() => { s.value = 5; });
+      batch(() => {
+        s.value = 5;
+      });
       expect(log1).toContain(6);
       expect(log2).toContain("err");
       expect(log3).toContain(8);

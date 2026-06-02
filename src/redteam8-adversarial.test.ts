@@ -24,7 +24,9 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
     const f = computed(() => d.value * 2);
     const g = computed(() => e.value + f.value);
     const spy = vi.fn();
-    effect(() => { spy(g.value); });
+    effect(() => {
+      spy(g.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(16);
     spy.mockClear();
     a.value = 4;
@@ -40,7 +42,9 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
     const sources = [a, b, c];
     const picked = computed(() => sources[selector.value]!.value);
     const spy = vi.fn();
-    effect(() => { spy(picked.value); });
+    effect(() => {
+      spy(picked.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(10);
     spy.mockClear();
     selector.value = 1;
@@ -62,7 +66,9 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
       cur = computed(() => prev.value + 1);
     }
     const spy = vi.fn();
-    effect(() => { spy(cur.value); });
+    effect(() => {
+      spy(cur.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(21);
     spy.mockClear();
     s.value = 100;
@@ -75,9 +81,11 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
     const x = signal(1);
     const y = signal(2);
     const z = signal(3);
-    const c = computed(() => flag.value ? x.value + y.value : z.value);
+    const c = computed(() => (flag.value ? x.value + y.value : z.value));
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(3);
     spy.mockClear();
     z.value = 99;
@@ -102,10 +110,16 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
     const ac = computed(() => a.value + c.value);
     const sum = computed(() => ab.value + bc.value + ac.value);
     const spy = vi.fn();
-    effect(() => { spy(sum.value); });
+    effect(() => {
+      spy(sum.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(12);
     spy.mockClear();
-    batch(() => { a.value = 10; b.value = 20; c.value = 30; });
+    batch(() => {
+      a.value = 10;
+      b.value = 20;
+      c.value = 30;
+    });
     expect(spy).toHaveBeenCalledTimes(1);
     expect(spy).toHaveBeenLastCalledWith(120);
   });
@@ -116,7 +130,9 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
     const c2 = computed(() => s.value + 2);
     const c3 = computed(() => s.value + 3);
     const spy = vi.fn();
-    effect(() => { spy(c1.value + c2.value + c3.value); });
+    effect(() => {
+      spy(c1.value + c2.value + c3.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(6);
     spy.mockClear();
     s.value = 10;
@@ -128,7 +144,9 @@ describe("RT8: glitch-freedom - nasty graphs", () => {
     const signals = Array.from({ length: 20 }, (_, i) => signal(i));
     const sum = computed(() => signals.reduce((acc, s) => acc + s.value, 0));
     const spy = vi.fn();
-    effect(() => { spy(sum.value); });
+    effect(() => {
+      spy(sum.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(190);
     spy.mockClear();
     batch(() => {
@@ -152,12 +170,20 @@ describe("RT8: exception-safety - throw at every site", () => {
     const log: string[] = [];
     effect(() => {
       log.push("A:" + s.value);
-      if (s.value === 1) { throw new Error("A-boom"); }
+      if (s.value === 1) {
+        throw new Error("A-boom");
+      }
     });
-    effect(() => { log.push("B:" + s.value); });
-    effect(() => { log.push("C:" + s.value); });
+    effect(() => {
+      log.push("B:" + s.value);
+    });
+    effect(() => {
+      log.push("C:" + s.value);
+    });
     log.length = 0;
-    batch(() => { s.value = 1; });
+    batch(() => {
+      s.value = 1;
+    });
     expect(log).toContain("B:1");
     expect(log).toContain("C:1");
     log.length = 0;
@@ -180,7 +206,9 @@ describe("RT8: exception-safety - throw at every site", () => {
       const tv = v % 2 === 0 ? t.value : 0;
       log.push(v + tv);
       return () => {
-        if (cleanupThrows) { throw new Error("cleanup-die"); }
+        if (cleanupThrows) {
+          throw new Error("cleanup-die");
+        }
       };
     });
     log.length = 0;
@@ -198,15 +226,23 @@ describe("RT8: exception-safety - throw at every site", () => {
     const prev = setEffectErrorHandler(() => {});
     const s = signal(0);
     const broken = computed(() => {
-      if (s.value > 0) { throw new Error("comp-die"); }
+      if (s.value > 0) {
+        throw new Error("comp-die");
+      }
       return s.value;
     });
     const healthy = computed(() => s.value * 10);
     const log: string[] = [];
     effect(() => {
-      try { log.push("broken:" + broken.value); } catch { log.push("broken:ERR"); }
+      try {
+        log.push("broken:" + broken.value);
+      } catch {
+        log.push("broken:ERR");
+      }
     });
-    effect(() => { log.push("healthy:" + healthy.value); });
+    effect(() => {
+      log.push("healthy:" + healthy.value);
+    });
     log.length = 0;
     s.value = 1;
     expect(log).toContain("broken:ERR");
@@ -224,7 +260,9 @@ describe("RT8: exception-safety - throw at every site", () => {
     const c = computed(() => s.value * 2, {
       equals: (_a, _b) => {
         throwCount++;
-        if (throwCount === 2) { throw new Error("eq-die"); }
+        if (throwCount === 2) {
+          throw new Error("eq-die");
+        }
         return false;
       },
     });
@@ -242,7 +280,9 @@ describe("RT8: exception-safety - throw at every site", () => {
     let throwInSub = false;
     const log: number[] = [];
     subscribe(s, (v) => {
-      if (throwInSub) { throw new Error("sub-die"); }
+      if (throwInSub) {
+        throw new Error("sub-die");
+      }
       log.push(v);
     });
     log.length = 0;
@@ -258,12 +298,18 @@ describe("RT8: exception-safety - throw at every site", () => {
     const s = signal(0);
     let shouldThrow = true;
     const c = computed(() => {
-      if (shouldThrow && s.value > 0) { throw new Error("stuck?"); }
+      if (shouldThrow && s.value > 0) {
+        throw new Error("stuck?");
+      }
       return s.value;
     });
     const spy = vi.fn();
     effect(() => {
-      try { spy(c.value); } catch { spy("err"); }
+      try {
+        spy(c.value);
+      } catch {
+        spy("err");
+      }
     });
     spy.mockClear();
     s.value = 1;
@@ -280,7 +326,9 @@ describe("RT8: exception-safety - throw at every site", () => {
     const spy = vi.fn();
     effect(() => {
       spy(s.value);
-      if (s.value === 1) { throw new Error("notify-stuck?"); }
+      if (s.value === 1) {
+        throw new Error("notify-stuck?");
+      }
     });
     spy.mockClear();
     s.value = 1;
@@ -298,7 +346,9 @@ describe("RT8: exception-safety - throw at every site", () => {
     const spy = vi.fn();
     effect(() => {
       const sv = s.value;
-      if (sv === 1) { throw new Error("track-corrupt?"); }
+      if (sv === 1) {
+        throw new Error("track-corrupt?");
+      }
       spy(sv + t.value);
     });
     spy.mockClear();
@@ -315,7 +365,9 @@ describe("RT8: exception-safety - throw at every site", () => {
   it("multiple computeds throw in chain: error propagates cleanly", () => {
     const s = signal(0);
     const c1 = computed(() => {
-      if (s.value === 1) { throw new Error("c1"); }
+      if (s.value === 1) {
+        throw new Error("c1");
+      }
       return s.value;
     });
     const c2 = computed(() => c1.value + 1);
@@ -333,7 +385,9 @@ describe("RT8: exception-safety - throw at every site", () => {
     const s = signal(1);
     const spy = vi.fn();
     effect(() => {
-      if (s.value === 1) { throw new Error("first-run-die"); }
+      if (s.value === 1) {
+        throw new Error("first-run-die");
+      }
       spy(s.value);
     });
     expect(spy).not.toHaveBeenCalled();
@@ -352,7 +406,9 @@ describe("RT8: prior bug-classes prevention", () => {
     const b = computed(() => a.value + 1);
     const c = computed(() => a.value * 2);
     const observed: [number, number][] = [];
-    effect(() => { observed.push([b.value, c.value]); });
+    effect(() => {
+      observed.push([b.value, c.value]);
+    });
     observed.length = 0;
     a.value = 5;
     expect(observed).toEqual([[6, 10]]);
@@ -362,7 +418,9 @@ describe("RT8: prior bug-classes prevention", () => {
     const s = signal(5);
     const clamped = computed(() => Math.min(s.value, 10));
     const spy = vi.fn();
-    effect(() => { spy(clamped.value); });
+    effect(() => {
+      spy(clamped.value);
+    });
     spy.mockClear();
     s.value = 7;
     expect(spy).toHaveBeenCalledTimes(1);
@@ -381,12 +439,18 @@ describe("RT8: prior bug-classes prevention", () => {
     const t = signal(100);
     let throwOn = -1;
     const c = computed(() => {
-      if (s.value === throwOn) { throw new Error("flush-exc"); }
+      if (s.value === throwOn) {
+        throw new Error("flush-exc");
+      }
       return s.value + t.value;
     });
     const spy = vi.fn();
     effect(() => {
-      try { spy(c.value); } catch { spy("ERR"); }
+      try {
+        spy(c.value);
+      } catch {
+        spy("ERR");
+      }
     });
     expect(spy).toHaveBeenLastCalledWith(100);
     spy.mockClear();
@@ -408,12 +472,18 @@ describe("RT8: prior bug-classes prevention", () => {
     const prev = setEffectErrorHandler(() => {});
     const s = signal(0);
     const log: string[] = [];
-    effect(() => { log.push("E1:" + s.value); });
     effect(() => {
-      if (s.value === 1) { throw new Error("E2-die"); }
+      log.push("E1:" + s.value);
+    });
+    effect(() => {
+      if (s.value === 1) {
+        throw new Error("E2-die");
+      }
       log.push("E2:" + s.value);
     });
-    effect(() => { log.push("E3:" + s.value); });
+    effect(() => {
+      log.push("E3:" + s.value);
+    });
     log.length = 0;
     s.value = 1;
     expect(log).toContain("E1:1");
@@ -433,13 +503,19 @@ describe("RT8: prior bug-classes prevention", () => {
     const c1 = computed(() => s.value);
     const c2 = computed(() => c1.value + 1);
     const c3 = computed(() => {
-      if (c2.value === 2) { throw new Error("deep"); }
+      if (c2.value === 2) {
+        throw new Error("deep");
+      }
       return c2.value;
     });
     const c4 = computed(() => c3.value + 1);
     const spy = vi.fn();
     effect(() => {
-      try { spy(c4.value); } catch { spy("deep-err"); }
+      try {
+        spy(c4.value);
+      } catch {
+        spy("deep-err");
+      }
     });
     expect(spy).toHaveBeenLastCalledWith(2);
     spy.mockClear();
@@ -457,7 +533,11 @@ describe("RT8: prior bug-classes prevention", () => {
     const b = signal(2);
     const spy = vi.fn();
     effect(() => {
-      if (flag.value) { spy("a:" + a.value); } else { spy("b:" + b.value); }
+      if (flag.value) {
+        spy("a:" + a.value);
+      } else {
+        spy("b:" + b.value);
+      }
     });
     spy.mockClear();
     flag.value = false;
@@ -481,7 +561,9 @@ describe("RT8: prior bug-classes prevention", () => {
     const a = signal(1);
     const b = signal(2);
     const spy = vi.fn();
-    effect(() => { spy(a.value + b.value); });
+    effect(() => {
+      spy(a.value + b.value);
+    });
     spy.mockClear();
     batch(() => {
       a.value = 10;
@@ -499,7 +581,9 @@ describe("RT8: dispose/leak", () => {
   it("use-after-dispose: signal write after effect dispose is no-op", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(s.value); });
+    const dispose = effect(() => {
+      spy(s.value);
+    });
     dispose();
     spy.mockClear();
     s.value = 1;
@@ -515,7 +599,9 @@ describe("RT8: dispose/leak", () => {
     const log: number[] = [];
     const disposeSelf = effect(() => {
       log.push(s.value);
-      if (s.value === 1) { disposeSelf(); }
+      if (s.value === 1) {
+        disposeSelf();
+      }
     });
     log.length = 0;
     s.value = 1;
@@ -530,7 +616,9 @@ describe("RT8: dispose/leak", () => {
     const s = signal(0);
     const c = computed(() => s.value + 1);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(c.value); });
+    const dispose = effect(() => {
+      spy(c.value);
+    });
     dispose();
     spy.mockClear();
     s.value = 5;
@@ -541,11 +629,15 @@ describe("RT8: dispose/leak", () => {
   it("rapid create-dispose cycle: no edge accumulation", () => {
     const s = signal(0);
     for (let i = 0; i < 200; i++) {
-      const d = effect(() => { void s.value; });
+      const d = effect(() => {
+        void s.value;
+      });
       d();
     }
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     s.value = 1;
     expect(spy).toHaveBeenCalledTimes(1);
@@ -554,7 +646,9 @@ describe("RT8: dispose/leak", () => {
   it("dispose inside batch: effect not re-triggered", () => {
     const s = signal(0);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(s.value); });
+    const dispose = effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
@@ -567,7 +661,9 @@ describe("RT8: dispose/leak", () => {
 
   it("computed reading a disposed-effect's former source still works", () => {
     const s = signal(1);
-    const dispose = effect(() => { void s.value; });
+    const dispose = effect(() => {
+      void s.value;
+    });
     dispose();
     const c = computed(() => s.value * 5);
     expect(c.value).toBe(5);
@@ -586,14 +682,18 @@ describe("RT8: batch cycle-detection + re-entrancy", () => {
     const s = signal(0);
     let _caught = false;
     try {
-      effect(() => { s.value = s.value + 1; });
+      effect(() => {
+        s.value = s.value + 1;
+      });
     } catch (e: unknown) {
       _caught = true;
       expect((e as Error).message).toContain("Cycle");
     }
     const spy = vi.fn();
     const s2 = signal(10);
-    effect(() => { spy(s2.value); });
+    effect(() => {
+      spy(s2.value);
+    });
     spy.mockClear();
     s2.value = 20;
     expect(spy).toHaveBeenCalledWith(20);
@@ -607,15 +707,21 @@ describe("RT8: batch cycle-detection + re-entrancy", () => {
     const b = signal(0);
     let _caught = false;
     try {
-      effect(() => { b.value = a.value + 1; });
-      effect(() => { a.value = b.value + 1; });
+      effect(() => {
+        b.value = a.value + 1;
+      });
+      effect(() => {
+        a.value = b.value + 1;
+      });
     } catch (e: unknown) {
       _caught = true;
       expect((e as Error).message).toContain("Cycle");
     }
     const spy = vi.fn();
     const s = signal(0);
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     s.value = 99;
     expect(spy).toHaveBeenCalledWith(99);
@@ -626,11 +732,15 @@ describe("RT8: batch cycle-detection + re-entrancy", () => {
     const s = signal(0);
     const t = signal(100);
     const spy = vi.fn();
-    effect(() => { spy(s.value + t.value); });
+    effect(() => {
+      spy(s.value + t.value);
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
-      batch(() => { t.value = 200; });
+      batch(() => {
+        t.value = 200;
+      });
     });
     expect(spy).toHaveBeenCalledWith(201);
   });
@@ -648,7 +758,9 @@ describe("RT8: batch cycle-detection + re-entrancy", () => {
   it("batchIteration resets after successful flush", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     for (let i = 1; i <= 150; i++) {
       spy.mockClear();
       s.value = i;
@@ -685,7 +797,9 @@ describe("RT8: untracked/peek correctness", () => {
     const b = signal(2);
     const c = computed(() => a.value + untracked(() => b.value));
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     expect(spy).toHaveBeenLastCalledWith(3);
     spy.mockClear();
     a.value = 10;
@@ -699,7 +813,9 @@ describe("RT8: untracked/peek correctness", () => {
     const s = signal(1);
     const c = computed(() => s.value * 10);
     const spy = vi.fn();
-    effect(() => { spy(c.peek()); });
+    effect(() => {
+      spy(c.peek());
+    });
     expect(spy).toHaveBeenLastCalledWith(10);
     spy.mockClear();
     s.value = 5;
@@ -710,7 +826,9 @@ describe("RT8: untracked/peek correctness", () => {
   it("peek on signal: returns current without tracking", () => {
     const s = signal(42);
     const spy = vi.fn();
-    effect(() => { spy(s.peek()); });
+    effect(() => {
+      spy(s.peek());
+    });
     spy.mockClear();
     s.value = 99;
     expect(spy).not.toHaveBeenCalled();
@@ -722,7 +840,9 @@ describe("RT8: untracked/peek correctness", () => {
     const spy = vi.fn();
     effect(() => {
       try {
-        untracked(() => { throw new Error("ut-throw"); });
+        untracked(() => {
+          throw new Error("ut-throw");
+        });
       } catch {
         // swallow
       }
@@ -758,7 +878,9 @@ describe("RT8: untracked/peek correctness", () => {
   it("peek on errored computed: throws the cached error", () => {
     const s = signal(0);
     const c = computed(() => {
-      if (s.value === 1) { throw new Error("peek-err"); }
+      if (s.value === 1) {
+        throw new Error("peek-err");
+      }
       return s.value;
     });
     s.value = 1;
@@ -773,7 +895,9 @@ describe("RT8: untracked/peek correctness", () => {
     const spy = vi.fn();
     effect(() => {
       const sv = s.value;
-      batch(() => { untracked(() => t.value); });
+      batch(() => {
+        untracked(() => t.value);
+      });
       spy(sv);
     });
     spy.mockClear();
@@ -793,7 +917,9 @@ describe("RT8: additional adversarial edge cases", () => {
     const parity = computed(() => s.value % 2); // 0 or 1
     const downstream = computed(() => parity.value * 100);
     const spy = vi.fn();
-    effect(() => { spy(downstream.value); });
+    effect(() => {
+      spy(downstream.value);
+    });
     spy.mockClear();
     // Change s but parity stays same (0→2, parity still 0)
     s.value = 2;
@@ -822,7 +948,9 @@ describe("RT8: additional adversarial edge cases", () => {
     const c = computed(() => s.value * s.value);
     // Never read c before subscribing
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     expect(spy).toHaveBeenCalledWith(9);
     spy.mockClear();
     s.value = 4;
@@ -837,7 +965,9 @@ describe("RT8: additional adversarial edge cases", () => {
     effect(() => {
       outer.push(s.value);
       if (s.value === 1 && !innerDispose) {
-        innerDispose = effect(() => { inner.push(s.value); });
+        innerDispose = effect(() => {
+          inner.push(s.value);
+        });
       }
     });
     expect(outer).toEqual([0]);
@@ -848,13 +978,17 @@ describe("RT8: additional adversarial edge cases", () => {
     s.value = 2;
     expect(outer).toContain(2);
     expect(inner).toContain(2);
-    if (innerDispose) { innerDispose(); }
+    if (innerDispose) {
+      innerDispose();
+    }
   });
 
   it("signal with equals:false always notifies", () => {
     const s = signal(5, { equals: false });
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     s.value = 5; // same value but equals:false
     expect(spy).toHaveBeenCalledWith(5);
@@ -865,7 +999,9 @@ describe("RT8: additional adversarial edge cases", () => {
     const s = signal(0);
     const c = computed(() => s.value % 2, { equals: false });
     const spy = vi.fn();
-    effect(() => { spy(c.value); });
+    effect(() => {
+      spy(c.value);
+    });
     spy.mockClear();
     s.value = 2; // c returns 0 again, but equals:false means changed
     expect(spy).toHaveBeenCalledTimes(1);
@@ -874,7 +1010,9 @@ describe("RT8: additional adversarial edge cases", () => {
   it("batch with signal.peek inside: peek does not affect batch", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); });
+    effect(() => {
+      spy(s.value);
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
@@ -907,7 +1045,9 @@ describe("RT8: additional adversarial edge cases", () => {
   it("subscribe returns dispose that actually stops notifications", () => {
     const s = signal(0);
     const log: number[] = [];
-    const dispose = subscribe(s, (v) => { log.push(v); });
+    const dispose = subscribe(s, (v) => {
+      log.push(v);
+    });
     log.length = 0;
     s.value = 1;
     expect(log).toEqual([1]);
@@ -923,7 +1063,9 @@ describe("RT8: additional adversarial edge cases", () => {
     let shouldThrow = false;
     const c = computed(() => {
       const av = a.value;
-      if (shouldThrow) { throw new Error("mid-track"); }
+      if (shouldThrow) {
+        throw new Error("mid-track");
+      }
       return av + b.value;
     });
     expect(c.value).toBe(10);

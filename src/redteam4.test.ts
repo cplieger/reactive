@@ -1,14 +1,7 @@
 // @vitest-environment happy-dom
 // RED-TEAM round-4 convergence check
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  signal,
-  effect,
-  batch,
-  computed,
-  setEffectErrorHandler,
-  createStore,
-} from "./index.js";
+import { signal, effect, batch, computed, setEffectErrorHandler, createStore } from "./index.js";
 import type { EffectErrorHandler } from "./index.js";
 
 // ---------------------------------------------------------------------------
@@ -20,9 +13,13 @@ describe("cleanup throw + body throw in same run", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("both cleanup and body throw: both errors routed to handler, effect re-subscribes", () => {
     const s = signal(0);
@@ -30,13 +27,17 @@ describe("cleanup throw + body throw in same run", () => {
     effect(() => {
       const v = s.value;
       values.push(v);
-      if (v === 1) {throw new Error("body-throw-1");}
-      return () => { throw new Error("cleanup-throw"); };
+      if (v === 1) {
+        throw new Error("body-throw-1");
+      }
+      return () => {
+        throw new Error("cleanup-throw");
+      };
     });
     // Trigger: cleanup throws then body throws
     s.value = 1;
-    expect(errors.some(e => (e as Error).message === "cleanup-throw")).toBe(true);
-    expect(errors.some(e => (e as Error).message === "body-throw-1")).toBe(true);
+    expect(errors.some((e) => (e as Error).message === "cleanup-throw")).toBe(true);
+    expect(errors.some((e) => (e as Error).message === "body-throw-1")).toBe(true);
     // Effect should still re-execute on next change
     errors.length = 0;
     s.value = 2;
@@ -69,9 +70,13 @@ describe("many effects' cleanups throw in single flush", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("10 effects all with throwing cleanups: all re-execute correctly", () => {
     const s = signal(0);
@@ -80,10 +85,14 @@ describe("many effects' cleanups throw in single flush", () => {
       const spy = spies[i]!;
       effect(() => {
         spy(s.value);
-        return () => { throw new Error(`cleanup-${i}`); };
+        return () => {
+          throw new Error(`cleanup-${i}`);
+        };
       });
     }
-    for (const spy of spies) {spy.mockClear();}
+    for (const spy of spies) {
+      spy.mockClear();
+    }
     s.value = 1;
     // All effects should re-execute despite all cleanups throwing
     for (const spy of spies) {
@@ -98,13 +107,17 @@ describe("many effects' cleanups throw in single flush", () => {
     for (let i = 0; i < 5; i++) {
       effect(() => {
         results.push(s.value);
-        return () => { throw new Error(`batch-cleanup-${i}`); };
+        return () => {
+          throw new Error(`batch-cleanup-${i}`);
+        };
       });
     }
     results.length = 0;
     errors.length = 0;
-    batch(() => { s.value = 99; });
-    expect(results.filter(v => v === 99).length).toBe(5);
+    batch(() => {
+      s.value = 99;
+    });
+    expect(results.filter((v) => v === 99).length).toBe(5);
     expect(errors.length).toBe(5);
   });
 });
@@ -118,19 +131,25 @@ describe("dispose during cleanup throw", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("dispose() when cleanup throws: error goes to handler, does not propagate", () => {
     const s = signal(0);
     const dispose = effect(() => {
       void s.value;
-      return () => { throw new Error("dispose-cleanup-throw"); };
+      return () => {
+        throw new Error("dispose-cleanup-throw");
+      };
     });
     // dispose must NOT throw
     expect(() => dispose()).not.toThrow();
-    expect(errors.some(e => (e as Error).message === "dispose-cleanup-throw")).toBe(true);
+    expect(errors.some((e) => (e as Error).message === "dispose-cleanup-throw")).toBe(true);
   });
 
   it("after dispose with cleanup throw, signal no longer triggers effect", () => {
@@ -138,7 +157,9 @@ describe("dispose during cleanup throw", () => {
     const spy = vi.fn();
     const dispose = effect(() => {
       spy(s.value);
-      return () => { throw new Error("dispose-cleanup"); };
+      return () => {
+        throw new Error("dispose-cleanup");
+      };
     });
     spy.mockClear();
     dispose();
@@ -156,14 +177,20 @@ describe("computed cleanup paths", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("effect reading computed that throws: error in handler, effect recovers", () => {
     const s = signal(0);
     const c = computed(() => {
-      if (s.value === 1) {throw new Error("computed-throw");}
+      if (s.value === 1) {
+        throw new Error("computed-throw");
+      }
       return s.value * 10;
     });
     const values: (number | string)[] = [];
@@ -185,7 +212,9 @@ describe("computed cleanup paths", () => {
   it("computed throwing does not leave dirty flag stuck", () => {
     const s = signal(0);
     const c = computed(() => {
-      if (s.value === 1) {throw new Error("stuck?");}
+      if (s.value === 1) {
+        throw new Error("stuck?");
+      }
       return s.value;
     });
     expect(c.value).toBe(0);
@@ -210,7 +239,9 @@ describe("store effect cleanup throw", () => {
     console.error = errSpy;
     store.effect(() => {
       values.push(store.get("x"));
-      return () => { throw new Error("store-cleanup-boom"); };
+      return () => {
+        throw new Error("store-cleanup-boom");
+      };
     });
     store.set("x", 1);
     store.set("x", 2);
@@ -227,7 +258,9 @@ describe("store effect cleanup throw", () => {
     console.error = vi.fn();
     const dispose = store.effect(() => {
       void store.get("x");
-      return () => { throw new Error("store-dispose-cleanup"); };
+      return () => {
+        throw new Error("store-dispose-cleanup");
+      };
     });
     expect(() => dispose()).not.toThrow();
     console.error = origErr;
@@ -241,47 +274,75 @@ describe("store effect cleanup throw", () => {
 describe("exception inside effectErrorHandler", () => {
   let prevHandler: EffectErrorHandler;
   beforeEach(() => {
-    prevHandler = setEffectErrorHandler(() => { /* swallow */ });
+    prevHandler = setEffectErrorHandler(() => {
+      /* swallow */
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("if effectErrorHandler throws, system remains usable", () => {
-    setEffectErrorHandler(() => { throw new Error("handler-throws"); });
+    setEffectErrorHandler(() => {
+      throw new Error("handler-throws");
+    });
     const s = signal(0);
     // Effect that throws
     effect(() => {
-      if (s.value === 1) {throw new Error("trigger");}
+      if (s.value === 1) {
+        throw new Error("trigger");
+      }
       return undefined;
     });
     // This will cause effectErrorHandler to be called, which itself throws
     // The system should still work after (drainPending has try/finally)
-    try { s.value = 1; } catch { /* expected */ }
+    try {
+      s.value = 1;
+    } catch {
+      /* expected */
+    }
     // Reset handler and verify system still works
     const errors: unknown[] = [];
     setEffectErrorHandler((e) => errors.push(e));
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 2;
     expect(spy).toHaveBeenCalledWith(2);
   });
 
   it("if effectErrorHandler throws during cleanup, next effects still run", () => {
-    setEffectErrorHandler(() => { throw new Error("handler-boom"); });
+    setEffectErrorHandler(() => {
+      throw new Error("handler-boom");
+    });
     const s = signal(0);
     const spy = vi.fn();
     effect(() => {
       void s.value;
-      return () => { throw new Error("cleanup!"); };
+      return () => {
+        throw new Error("cleanup!");
+      };
     });
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     // Cleanup will throw -> handler will throw -> but drainPending catches per-effect
-    try { s.value = 1; } catch { /* may propagate */ }
+    try {
+      s.value = 1;
+    } catch {
+      /* may propagate */
+    }
     // Check if the second effect still ran
     // NOTE: If effectErrorHandler throws, it propagates from the try/catch in execute()
     // which is itself inside a try/catch in drainPending. Let's verify.
-    setEffectErrorHandler(() => { /* swallow */ });
+    setEffectErrorHandler(() => {
+      /* swallow */
+    });
     spy.mockClear();
     s.value = 2;
     expect(spy).toHaveBeenCalledWith(2);
@@ -293,21 +354,31 @@ describe("exception inside effectErrorHandler", () => {
 // ---------------------------------------------------------------------------
 
 describe("fake timers: no async leaks in error paths", () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   let prevHandler: EffectErrorHandler;
   beforeEach(() => {
-    prevHandler = setEffectErrorHandler(() => { /* swallow */ });
+    prevHandler = setEffectErrorHandler(() => {
+      /* swallow */
+    });
   });
-  afterEach(() => { setEffectErrorHandler(prevHandler); });
+  afterEach(() => {
+    setEffectErrorHandler(prevHandler);
+  });
 
   it("cleanup throw + re-execution is fully synchronous", () => {
     const s = signal(0);
     const spy = vi.fn();
     effect(() => {
       spy(s.value);
-      return () => { throw new Error("sync-cleanup"); };
+      return () => {
+        throw new Error("sync-cleanup");
+      };
     });
     spy.mockClear();
     s.value = 1;
@@ -321,12 +392,18 @@ describe("fake timers: no async leaks in error paths", () => {
     for (let i = 0; i < 3; i++) {
       effect(() => {
         results.push(s.value);
-        if (s.value === 1) {throw new Error(`body-${i}`);}
-        return () => { throw new Error(`cleanup-${i}`); };
+        if (s.value === 1) {
+          throw new Error(`body-${i}`);
+        }
+        return () => {
+          throw new Error(`cleanup-${i}`);
+        };
       });
     }
     results.length = 0;
-    batch(() => { s.value = 1; });
+    batch(() => {
+      s.value = 1;
+    });
     // All should have attempted to run synchronously
     expect(results.length).toBe(3);
   });

@@ -263,7 +263,7 @@ function refreshComputed(comp: ComputedNode): void {
   comp._globalVersion = globalVersion;
 
   // If not dirty but CHECK, verify sources first
-  if (!(comp._flags & DIRTY) && (comp._flags & CHECK)) {
+  if (!(comp._flags & DIRTY) && comp._flags & CHECK) {
     let sn = comp._sources;
     while (sn !== undefined) {
       const src = sn._source;
@@ -537,7 +537,8 @@ export function computed<T>(fn: () => T, options?: SignalOptions<T>): ReadonlySi
     _sources: undefined,
     // ComputedNode-specific fields
     _fn: fn,
-    _equals: eq === false ? () => false : eq ? (a: unknown, b: unknown) => eq(a as T, b as T) : undefined,
+    _equals:
+      eq === false ? () => false : eq ? (a: unknown, b: unknown) => eq(a as T, b as T) : undefined,
     _globalVersion: -1,
   };
 
@@ -641,7 +642,10 @@ export function untracked<T>(fn: () => T): T {
 }
 
 /** Subscribe to a signal, calling cb on every change. Returns dispose function. */
-export function subscribe<T>(sig: Signal<T> | ReadonlySignal<T>, cb: (value: T) => void): () => void {
+export function subscribe<T>(
+  sig: Signal<T> | ReadonlySignal<T>,
+  cb: (value: T) => void,
+): () => void {
   return effect(() => {
     cb(sig.value);
     return undefined;
@@ -668,9 +672,7 @@ export function on<T, U>(
   let prevResult: U | undefined;
   let first = true;
   return () => {
-    const input: T | unknown[] = Array.isArray(deps)
-      ? deps.map((d) => d())
-      : deps();
+    const input: T | unknown[] = Array.isArray(deps) ? deps.map((d) => d()) : deps();
     if (first && options?.defer) {
       first = false;
       prevInput = input;

@@ -21,7 +21,9 @@ import type { EffectErrorHandler } from "./index.js";
 describe("round-1 fix verification: drainPending invariants", () => {
   let prevHandler: EffectErrorHandler;
   beforeEach(() => {
-    prevHandler = setEffectErrorHandler(() => { /* swallow */ });
+    prevHandler = setEffectErrorHandler(() => {
+      /* swallow */
+    });
   });
   afterEach(() => {
     setEffectErrorHandler(prevHandler);
@@ -40,7 +42,10 @@ describe("round-1 fix verification: drainPending invariants", () => {
     s.value = 1; // triggers throw inside drainPending
     // System should still work - flushing must be false
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     s.value = 2;
     expect(spy).toHaveBeenCalledWith(2);
@@ -49,7 +54,10 @@ describe("round-1 fix verification: drainPending invariants", () => {
   it("batchDepth resets after nested batch throws at each level", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
 
     // Nested throws at each level
@@ -64,13 +72,19 @@ describe("round-1 fix verification: drainPending invariants", () => {
                 s.value = 3;
                 throw new Error("level 3");
               });
-            } catch { /* swallow */ }
+            } catch {
+              /* swallow */
+            }
             throw new Error("level 2");
           });
-        } catch { /* swallow */ }
+        } catch {
+          /* swallow */
+        }
         throw new Error("level 1");
       });
-    } catch { /* swallow */ }
+    } catch {
+      /* swallow */
+    }
 
     // batchDepth must be 0 - subsequent writes flush immediately
     spy.mockClear();
@@ -81,15 +95,22 @@ describe("round-1 fix verification: drainPending invariants", () => {
   it("equals-throw in signal does not corrupt flushing state", () => {
     const s = signal(1, {
       equals: (_prev, next) => {
-        if (next === 42) {throw new Error("equals boom");}
+        if (next === 42) {
+          throw new Error("equals boom");
+        }
         return false; // always notify
       },
     });
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
 
-    expect(() => { s.value = 42; }).toThrow("equals boom");
+    expect(() => {
+      s.value = 42;
+    }).toThrow("equals boom");
 
     // System should still work
     s.value = 2;
@@ -106,7 +127,9 @@ describe("exception in effect body", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
   afterEach(() => {
     setEffectErrorHandler(prevHandler);
@@ -119,12 +142,17 @@ describe("exception in effect body", () => {
 
     // Effect 1 throws
     effect(() => {
-      if (s.value === 1) {throw new Error("e1 boom");}
+      if (s.value === 1) {
+        throw new Error("e1 boom");
+      }
       spy1(s.value);
       return undefined;
     });
     // Effect 2 should still run
-    effect(() => { spy2(s.value); return undefined; });
+    effect(() => {
+      spy2(s.value);
+      return undefined;
+    });
 
     spy1.mockClear();
     spy2.mockClear();
@@ -139,10 +167,15 @@ describe("exception in effect body", () => {
     const spy = vi.fn();
 
     effect(() => {
-      if (a.value === 1) {throw new Error("a boom");}
+      if (a.value === 1) {
+        throw new Error("a boom");
+      }
       return undefined;
     });
-    effect(() => { spy(b.value); return undefined; });
+    effect(() => {
+      spy(b.value);
+      return undefined;
+    });
 
     spy.mockClear();
     batch(() => {
@@ -180,7 +213,9 @@ describe("self-trigger loop bound", () => {
       runs++;
       const v = s.value;
       if (v < 50) {
-        batch(() => { s.value = v + 1; });
+        batch(() => {
+          s.value = v + 1;
+        });
       }
       return undefined;
     });
@@ -199,13 +234,18 @@ describe("computed chain with throwing equals", () => {
     let throwOnEquals = false;
     const inner = computed(() => s.value * 2, {
       equals: () => {
-        if (throwOnEquals) {throw new Error("inner eq boom");}
+        if (throwOnEquals) {
+          throw new Error("inner eq boom");
+        }
         return false; // always changed
       },
     });
     const outer = computed(() => inner.value + 10);
     const spy = vi.fn();
-    effect(() => { spy(outer.value); return undefined; });
+    effect(() => {
+      spy(outer.value);
+      return undefined;
+    });
     expect(spy).toHaveBeenCalledWith(12); // 1*2+10
 
     spy.mockClear();
@@ -220,11 +260,16 @@ describe("computed chain with throwing equals", () => {
     const s = signal(1);
     const c1 = computed(() => s.value);
     const c2 = computed(() => c1.value * 2, {
-      equals: () => { throw new Error("c2 eq"); },
+      equals: () => {
+        throw new Error("c2 eq");
+      },
     });
     const c3 = computed(() => c2.value + 100);
     const spy = vi.fn();
-    effect(() => { spy(c3.value); return undefined; });
+    effect(() => {
+      spy(c3.value);
+      return undefined;
+    });
     expect(spy).toHaveBeenCalledWith(102); // 1*2+100
 
     spy.mockClear();
@@ -241,7 +286,10 @@ describe("dispose from inside another effect", () => {
   it("disposing effect B from inside effect A does not crash", () => {
     const s = signal(0);
     const spyB = vi.fn();
-    const disposeB = effect(() => { spyB(s.value); return undefined; });
+    const disposeB = effect(() => {
+      spyB(s.value);
+      return undefined;
+    });
 
     effect(() => {
       if (s.value === 1) {
@@ -263,18 +311,22 @@ describe("dispose from inside another effect", () => {
     const s = signal(0);
     let disposeRef: (() => void) | null = null;
     const errors: unknown[] = [];
-    const prev = setEffectErrorHandler((e) => { errors.push(e); });
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
     disposeRef = effect(() => {
       void s.value;
       return () => {
         // cleanup tries to dispose self (already being disposed)
-        if (disposeRef) {disposeRef();}
+        if (disposeRef) {
+          disposeRef();
+        }
       };
     });
     // Trigger re-run (which calls cleanup which calls dispose)
     s.value = 1;
     // Should not have stack overflow error
-    expect(errors.every(e => !(e instanceof RangeError))).toBe(true);
+    expect(errors.every((e) => !(e instanceof RangeError))).toBe(true);
     setEffectErrorHandler(prev);
   });
 });
@@ -287,11 +339,13 @@ describe("on() with empty deps", () => {
   it("on() with empty array deps runs once and never re-triggers", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(on([] as (() => unknown)[], (vals) => {
-      // Read s inside body (should not be tracked due to untracked in on())
-      spy(vals, s.value);
-      return undefined;
-    }));
+    effect(
+      on([] as (() => unknown)[], (vals) => {
+        // Read s inside body (should not be tracked due to untracked in on())
+        spy(vals, s.value);
+        return undefined;
+      }),
+    );
     expect(spy).toHaveBeenCalledWith([], 0);
     spy.mockClear();
     s.value = 1;
@@ -301,7 +355,15 @@ describe("on() with empty deps", () => {
   it("on() with single dep returning undefined", () => {
     const s = signal<undefined>(undefined);
     const spy = vi.fn();
-    effect(on(() => s.value, (v) => { spy(v); return undefined; }));
+    effect(
+      on(
+        () => s.value,
+        (v) => {
+          spy(v);
+          return undefined;
+        },
+      ),
+    );
     expect(spy).toHaveBeenCalledWith(undefined);
   });
 });
@@ -317,11 +379,16 @@ describe("store deep nesting", () => {
     store.subscribe("x", spy);
 
     const nest = (depth: number, fn: () => void): void => {
-      if (depth === 0) { fn(); return; }
+      if (depth === 0) {
+        fn();
+        return;
+      }
       store.batch(() => nest(depth - 1, fn));
     };
 
-    nest(10, () => { store.set("x", 42); });
+    nest(10, () => {
+      store.set("x", 42);
+    });
     expect(spy).toHaveBeenCalledWith(42);
     expect(spy).toHaveBeenCalledTimes(1);
   });
@@ -396,7 +463,9 @@ describe("reconcile: large scale", () => {
       update: (el: HTMLElement, i: { id: string; label: string }) => {
         el.textContent = i.label;
       },
-      onRemove: (_el: HTMLElement, key: string) => { removed.push(key); },
+      onRemove: (_el: HTMLElement, key: string) => {
+        removed.push(key);
+      },
     };
 
     reconcile(parent, items, spec);
@@ -467,11 +536,15 @@ describe("store: dispose from cleanup", () => {
     disposeRef = store.effect(() => {
       void store.get("x");
       return () => {
-        if (disposeRef) {disposeRef();}
+        if (disposeRef) {
+          disposeRef();
+        }
       };
     });
     // Trigger re-run which calls cleanup which calls dispose
-    expect(() => { store.set("x", 1); }).not.toThrow();
+    expect(() => {
+      store.set("x", 1);
+    }).not.toThrow();
   });
 
   it("store effect double dispose is no-op", () => {
@@ -480,7 +553,9 @@ describe("store: dispose from cleanup", () => {
     let cleanupCount = 0;
     const dispose = store.effect(() => {
       void store.get("x");
-      return () => { cleanupCount++; };
+      return () => {
+        cleanupCount++;
+      };
     });
     dispose();
     expect(cleanupCount).toBe(1);
@@ -497,7 +572,10 @@ describe("flushSync", () => {
   it("flushSync outside batch drains pending", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     // Normally writes flush immediately, but let's verify flushSync is a no-op
     // when nothing is pending
@@ -508,7 +586,10 @@ describe("flushSync", () => {
   it("flushSync inside batch is a no-op", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.value); return undefined; });
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
     spy.mockClear();
     batch(() => {
       s.value = 1;
@@ -528,7 +609,10 @@ describe("computed: lazy after effect disposal", () => {
     const s = signal(1);
     const c = computed(() => s.value * 10);
     const spy = vi.fn();
-    const dispose = effect(() => { spy(c.value); return undefined; });
+    const dispose = effect(() => {
+      spy(c.value);
+      return undefined;
+    });
     expect(spy).toHaveBeenCalledWith(10);
     dispose();
     s.value = 5;
@@ -545,7 +629,10 @@ describe("signal peek", () => {
   it("peek inside effect does not create subscription", () => {
     const s = signal(0);
     const spy = vi.fn();
-    effect(() => { spy(s.peek()); return undefined; });
+    effect(() => {
+      spy(s.peek());
+      return undefined;
+    });
     expect(spy).toHaveBeenCalledWith(0);
     spy.mockClear();
     s.value = 1;
@@ -563,11 +650,15 @@ describe("effect cleanup ordering", () => {
     const order: string[] = [];
     effect(() => {
       order.push(`A:${s.value}`);
-      return () => { order.push(`cleanup-A:${s.value}`); };
+      return () => {
+        order.push(`cleanup-A:${s.value}`);
+      };
     });
     effect(() => {
       order.push(`B:${s.value}`);
-      return () => { order.push(`cleanup-B:${s.value}`); };
+      return () => {
+        order.push(`cleanup-B:${s.value}`);
+      };
     });
     order.length = 0;
     s.value = 1;
@@ -588,7 +679,9 @@ describe("computed error recovery in effect", () => {
   const errors: unknown[] = [];
   beforeEach(() => {
     errors.length = 0;
-    prevHandler = setEffectErrorHandler((e) => { errors.push(e); });
+    prevHandler = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
   });
   afterEach(() => {
     setEffectErrorHandler(prevHandler);
@@ -597,11 +690,16 @@ describe("computed error recovery in effect", () => {
   it("effect recovers after computed stops throwing", () => {
     const s = signal(0);
     const c = computed(() => {
-      if (s.value === 0) {throw new Error("zero");}
+      if (s.value === 0) {
+        throw new Error("zero");
+      }
       return s.value * 2;
     });
     const values: number[] = [];
-    effect(() => { values.push(c.value); return undefined; });
+    effect(() => {
+      values.push(c.value);
+      return undefined;
+    });
     // First run throws
     expect(errors.length).toBe(1);
     expect(values).toEqual([]);

@@ -5,13 +5,7 @@
 // flush, throw then immediate new dispatch, equals throwing in signal setter,
 // dispose() in error handler, diamond with dual throwing computeds.
 import { describe, it, expect, vi } from "vitest";
-import {
-  signal,
-  effect,
-  batch,
-  computed,
-  setEffectErrorHandler,
-} from "./index.js";
+import { signal, effect, batch, computed, setEffectErrorHandler } from "./index.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -337,9 +331,11 @@ describe("signal equals function throwing", () => {
       return undefined;
     });
     spy.mockClear();
-    expect(() => batch(() => {
-      s.value = 99;
-    })).toThrow("eq-batch");
+    expect(() =>
+      batch(() => {
+        s.value = 99;
+      }),
+    ).toThrow("eq-batch");
     spy.mockClear();
     s.value = 1;
     expect(spy).toHaveBeenCalledWith(1);
@@ -446,11 +442,13 @@ describe("diamond with dual throwing computeds", () => {
     });
     log.length = 0;
     root.value = 1;
-    expect(log.some(entry => entry.includes("left-boom") && entry.includes("right-boom"))).toBe(true);
+    expect(log.some((entry) => entry.includes("left-boom") && entry.includes("right-boom"))).toBe(
+      true,
+    );
     // Recovery
     log.length = 0;
     root.value = -1;
-    expect(log.some(entry => entry === "ok")).toBe(true);
+    expect(log.some((entry) => entry === "ok")).toBe(true);
     setEffectErrorHandler(prev);
   });
 });
