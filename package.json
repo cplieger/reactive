@@ -31,5 +31,9 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cplieger/reactive.git"
-  }
+  },
+  "files": [
+    "src/",
+    "jsr.json"
+  ]
 }

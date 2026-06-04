@@ -25,6 +25,9 @@ export default [
       "**/*.gen.js",
       // Test fixtures that aren't real code
       "**/test-stubs/**",
+      // ESLint flat config files (the linter does not need to lint its own config)
+      "eslint.config.mjs",
+      "eslint.config.base.mjs",
       "**/__mocks__/**",
     ],
   },
@@ -40,7 +43,13 @@ export default [
       sourceType: "module",
       parserOptions: {
         projectService: {
-          allowDefaultProject: ["*.test.ts", "*.property.test.ts", "fc-strict-setup.ts"],
+          allowDefaultProject: [
+            "*.test.ts",
+            "*.property.test.ts",
+            "fc-strict-setup.ts",
+            "eslint.config.mjs",
+            "eslint.config.base.mjs",
+          ],
           maximumDefaultProjectFileMatchCount_THIS_WILL_SLOW_DOWN_LINTING: 20,
         },
         tsconfigRootDir: import.meta.dirname,
