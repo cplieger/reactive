@@ -25,6 +25,9 @@ export default [
       "**/*.gen.js",
       // Test fixtures that aren't real code
       "**/test-stubs/**",
+      // ESLint flat config files (the linter does not need to lint its own config)
+      "eslint.config.mjs",
+      "eslint.config.base.mjs",
       "**/__mocks__/**",
     ],
   },
