@@ -2,3 +2,8 @@ node_modules/
 dist/
 coverage/
 .vitest-cache/
+
+# Kiro skill artifacts (code-review, refactor, steering-maintenance)
+**/.code-review/
+**/.refactor/
+**/.steering-maintenance/
