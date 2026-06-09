@@ -104,9 +104,17 @@ export function createBus<M>(options?: {
       slot.snapshot = Array.from(slot.set);
       slot.dirty = false;
     }
+    // No-payload events (`emit(event)` with no second arg) invoke handlers with
+    // zero arguments, honoring the `() => void` handler type — a `() => void`
+    // handler should never receive a stray `undefined`.
+    const hasPayload = args.length > 1;
     for (const handler of slot.snapshot) {
       try {
-        handler(payload);
+        if (hasPayload) {
+          handler(payload);
+        } else {
+          handler();
+        }
       } catch (err) {
         onError(event, err);
       }

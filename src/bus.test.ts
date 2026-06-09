@@ -23,13 +23,16 @@ describe("createBus", () => {
   });
 
   it("void events emit with no payload arg", () => {
-    expect.assertions(1);
+    expect.assertions(2);
     const bus = createBus<Events>();
-    let pings = 0;
-    bus.on("ping", () => pings++);
+    const handler = vi.fn<() => void>();
+    bus.on("ping", handler);
     bus.emit("ping");
     bus.emit("ping");
-    expect(pings).toBe(2);
+    expect(handler).toHaveBeenCalledTimes(2);
+    // A `() => void` handler must be invoked with zero arguments, not a stray
+    // `undefined`.
+    expect(handler).toHaveBeenCalledWith();
   });
 
   it("once fires exactly once then auto-unsubscribes", () => {
