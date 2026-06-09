@@ -85,9 +85,9 @@ export function createBus<M>(options?: {
   }
 
   function once<K extends keyof M>(event: K, handler: BusHandler<M[K]>): () => void {
-    const wrapped = ((payload?: unknown): void => {
+    const wrapped = ((...callArgs: unknown[]): void => {
       off(event, wrapped);
-      (handler as AnyHandler)(payload);
+      (handler as AnyHandler)(...callArgs);
     }) as BusHandler<M[K]>;
     return on(event, wrapped);
   }

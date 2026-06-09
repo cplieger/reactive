@@ -6,7 +6,7 @@
 // This is the data half of the two-tier list pattern (see `bindList` for the
 // render half). Built on `signal` + `SignalMap` — no separate engine.
 
-import { signal, type ReadonlySignal } from "./signal.js";
+import { signal, batch, type ReadonlySignal } from "./signal.js";
 import { SignalMap } from "./signal-map.js";
 
 /** A reactive, ordered, keyed collection of entities of type T. */
@@ -57,20 +57,25 @@ export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
   const sigs = new SignalMap<T>();
 
   function setAll(items: readonly T[]): void {
-    const ids: string[] = [];
-    const seen = new Set<string>();
-    for (const item of items) {
-      const id = keyOf(item);
-      ids.push(id);
-      seen.add(id);
-      sigs.ensure(id, item).value = item;
-    }
-    for (const id of order.peek()) {
-      if (!seen.has(id)) {
-        sigs.clear(id);
+    // Atomic: batch the per-entity writes + the order swap so effects (and any
+    // row update that cross-reads siblings) only run once the whole collection
+    // is consistent, not mid-mutation.
+    batch(() => {
+      const ids: string[] = [];
+      const seen = new Set<string>();
+      for (const item of items) {
+        const id = keyOf(item);
+        ids.push(id);
+        seen.add(id);
+        sigs.ensure(id, item).value = item;
       }
-    }
-    order.value = ids;
+      for (const id of order.peek()) {
+        if (!seen.has(id)) {
+          sigs.clear(id);
+        }
+      }
+      order.value = ids;
+    });
   }
 
   function upsert(item: T): void {
@@ -85,20 +90,22 @@ export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
   }
 
   function prepend(items: readonly T[]): void {
-    const newIds: string[] = [];
-    for (const item of items) {
-      const id = keyOf(item);
-      const existing = sigs.get(id);
-      if (existing === undefined) {
-        sigs.ensure(id, item);
-        newIds.push(id);
-      } else {
-        existing.value = item;
+    batch(() => {
+      const newIds: string[] = [];
+      for (const item of items) {
+        const id = keyOf(item);
+        const existing = sigs.get(id);
+        if (existing === undefined) {
+          sigs.ensure(id, item);
+          newIds.push(id);
+        } else {
+          existing.value = item;
+        }
       }
-    }
-    if (newIds.length > 0) {
-      order.value = [...newIds, ...order.peek()];
-    }
+      if (newIds.length > 0) {
+        order.value = [...newIds, ...order.peek()];
+      }
+    });
   }
 
   function update(id: string, next: T | ((cur: T) => T)): void {
