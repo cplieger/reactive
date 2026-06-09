@@ -47,6 +47,20 @@ describe("createCollection", () => {
     expect(c.has("missing")).toBe(false);
   });
 
+  it("prepend adds to the front; existing ids update in place without moving", () => {
+    expect.assertions(3);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([
+      { id: "b", n: 2 },
+      { id: "c", n: 3 },
+    ]);
+    c.prepend([{ id: "a", n: 1 }]);
+    expect([...c.ids.peek()]).toEqual(["a", "b", "c"]);
+    c.prepend([{ id: "b", n: 20 }]); // existing → update in place, no reorder
+    expect([...c.ids.peek()]).toEqual(["a", "b", "c"]);
+    expect(c.get("b")).toEqual({ id: "b", n: 20 });
+  });
+
   it("remove + clear", () => {
     expect.assertions(3);
     const c = createCollection<Row>(keyOf);

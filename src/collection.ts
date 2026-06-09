@@ -17,6 +17,9 @@ export interface Collection<T> {
   /** Add a new entity or replace an existing one (keyed by `keyOf`). New
    *  entities are appended to the order. */
   upsert(item: T): void;
+  /** Add new entities to the FRONT of the order (e.g. loading older items for
+   *  scroll-up pagination). Existing ids are updated in place without moving. */
+  prepend(items: readonly T[]): void;
   /** Update one entity in place (no-op if absent). Pass a value or an
    *  updater. Does not change order. */
   update(id: string, next: T | ((cur: T) => T)): void;
@@ -81,6 +84,23 @@ export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
     }
   }
 
+  function prepend(items: readonly T[]): void {
+    const newIds: string[] = [];
+    for (const item of items) {
+      const id = keyOf(item);
+      const existing = sigs.get(id);
+      if (existing === undefined) {
+        sigs.ensure(id, item);
+        newIds.push(id);
+      } else {
+        existing.value = item;
+      }
+    }
+    if (newIds.length > 0) {
+      order.value = [...newIds, ...order.peek()];
+    }
+  }
+
   function update(id: string, next: T | ((cur: T) => T)): void {
     const s = sigs.get(id);
     if (s === undefined) {
@@ -128,6 +148,7 @@ export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
   return {
     setAll,
     upsert,
+    prepend,
     update,
     remove,
     clear,

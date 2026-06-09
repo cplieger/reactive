@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 
 import { bindList } from "./bind-list.js";
 import { createCollection } from "./collection.js";
+import { signal, computed } from "./signal.js";
 
 interface Row {
   id: string;
@@ -92,6 +93,41 @@ describe("bindList", () => {
     expect(parent.children[0]?.getAttribute("data-row")).toBe("b");
     expect(parent.children[1]?.getAttribute("data-row")).toBe("a");
     expect(counts.mount).toBe(2); // reuse, no new mounts
+  });
+
+  it("renders a computed view (ListSource): filtered subset, reactive to the filter signal", () => {
+    expect.assertions(3);
+    const coll = createCollection<Row>(keyOf);
+    coll.setAll([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+      { id: "c", n: 3 },
+    ]);
+    const threshold = signal(0);
+    const view = {
+      ids: computed(() =>
+        coll
+          .items()
+          .filter((r) => r.n > threshold.value)
+          .map((r) => r.id),
+      ),
+      signalFor: (id: string) => coll.signalFor(id),
+    };
+    const parent = document.createElement("div");
+    bindList(parent, view, {
+      mount: (_item, id) => {
+        const el = document.createElement("div");
+        el.setAttribute("data-row", id);
+        return el;
+      },
+      update: (el, item) => {
+        el.textContent = String(item.n);
+      },
+    });
+    expect(parent.children.length).toBe(3);
+    threshold.value = 1; // drops a (n=1); view recomputes → structural reconcile
+    expect(parent.children.length).toBe(2);
+    expect(parent.children[0]?.getAttribute("data-row")).toBe("b");
   });
 
   it("dispose tears down: later updates no longer touch the DOM", () => {

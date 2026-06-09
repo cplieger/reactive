@@ -7,7 +7,7 @@
 
 > Signals + collections + DOM-reconciliation micro-framework for TypeScript
 
-A standalone reactive app-skeleton: fine-grained signals with automatic dependency tracking and synchronous batched effects, a typed per-key reactive store, a dynamic per-id signal registry (`SignalMap`), a reactive ordered keyed `Collection`, a two-tier list render binding (`bindList`), keyed-list DOM reconciliation, structural tree-diffing, and a typed event bus (`createBus`). The store, `SignalMap`, and `Collection` are thin facades over the single signal engine — one reactive core, not several. The bus is the deliberate counterpart for discrete events (state lives in signals; events go on the bus). Zero dependencies beyond the DOM API.
+A standalone reactive app-skeleton: fine-grained signals with automatic dependency tracking and synchronous batched effects, a typed per-key reactive store, a dynamic per-id signal registry (`SignalMap`), a reactive ordered keyed `Collection`, a two-tier list render binding (`bindList`), a CSP-safe element factory (`el`), keyed-list DOM reconciliation, structural tree-diffing, and a typed event bus (`createBus`). The store, `SignalMap`, and `Collection` are thin facades over the single signal engine — one reactive core, not several. The bus is the deliberate counterpart for discrete events (state lives in signals; events go on the bus). Zero dependencies beyond the DOM API.
 
 Mirrors semantics from @preact/signals-core and solid-js reactivity.
 
@@ -79,8 +79,9 @@ isComputed(doubled); // true
 - `isComputed(value): boolean` — type guard for computed signals
 - `setEffectErrorHandler(handler): EffectErrorHandler` — set global error handler for effects; returns the previous handler
 
-### DOM Reconciliation
+### DOM building & reconciliation
 
+- `el(tag, attrs?, ...children)` — CSP-safe element factory (the build half; `reconcile`/`patch` are the commit half). `className` → class; `on*` → handler property + `trackHandler` (so `patch` reconciles handlers); boolean DOM props (`hidden`/`disabled`/`checked`/`selected`/…) and `value`/`colSpan`/`rowSpan`/`tabIndex`/`htmlFor` → properties; everything else (`data-*`, `aria-*`, `style`, `id`) → `setAttribute`. String children become text nodes (never parsed as HTML); null/undefined attrs and children are skipped.
 - `reconcile<T>(parent, items, spec)` — keyed-list DOM reconciliation with mount/update/onRemove lifecycle
 - `patch(parent, ...children)` — structural tree-diff, replacing a parent's children with reconciled new nodes. Element nodes are keyed by their first `data-col` or `*-id` attribute (so reorders/re-patches reuse the matched node); unkeyed nodes match by position.
 - `reconcileChildren(parent, newChildren)` — low-level child reconciliation against existing DOM
@@ -99,14 +100,15 @@ A reactive ordered collection of keyed entities — the data half of the two-tie
 
 - `createCollection<T>(keyOf: (item: T) => string): Collection<T>` — returns a collection with:
   - `setAll(items)` — replace everything (same-order replacement does not bump `ids`)
-  - `upsert(item)` / `update(id, next | updater)` / `remove(id)` / `clear()`
+  - `upsert(item)` — add/replace one (appends new ids); `prepend(items)` — add to the front (scroll-up/load-older pagination)
+  - `update(id, next | updater)` / `remove(id)` / `clear()`
   - `get(id)` / `has(id)` (untracked), `signalFor(id)` (reactive per-entity), `size`
   - `ids: ReadonlySignal<readonly string[]>` — structure tier (add/remove/reorder only)
   - `items()` — ordered reactive snapshot (tracks order + every entity)
 
 ### List rendering
 
-- `bindList<T>(parent, collection, spec): () => void` — two-tier render binding. One structural effect tracks `collection.ids` and `reconcile`s the row list; each row owns a private effect tracking only its own entity signal, so a per-entity change repaints just that row with no structural reconcile. `spec`: `{ mount(item, id) => HTMLElement; update?(el, item, id); onRemove?(el, id) }` (`update` runs at mount and on every later change). Returns a dispose that tears down the structural effect and every row effect.
+- `bindList<T>(parent, source, spec): () => void` — two-tier render binding. `source` is a `ListSource<T>` = `{ ids, signalFor }`; a `Collection` satisfies it directly, and a filtered/sorted/paginated view is just `{ ids: computed(...), signalFor: collection.signalFor }` (pagination = a sliced view, not a separate primitive). One structural effect tracks `source.ids` and `reconcile`s the row list; each row owns a private effect tracking only its own entity signal, so a per-entity change repaints just that row with no structural reconcile. `spec`: `{ mount(item, id) => HTMLElement; update?(el, item, id); onRemove?(el, id) }` (`update` runs at mount and on every later change). Returns a dispose that tears down the structural effect and every row effect.
 
 ### Event bus
 
