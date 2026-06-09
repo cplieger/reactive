@@ -16,22 +16,24 @@
  *  argument. */
 export type BusHandler<T> = T extends undefined ? () => void : (payload: T) => void;
 
-/** A typed event bus over an event→payload map `M`. */
+/** A typed event bus over an event→payload map `M`. Methods are arrow-function
+ *  properties (not method signatures) so consumers can safely destructure
+ *  `const { on, emit } = bus` without unbound-`this` warnings. */
 export interface Bus<M> {
   /** Subscribe to an event. Returns an unsubscribe function. */
-  on<K extends keyof M>(event: K, handler: BusHandler<M[K]>): () => void;
+  on: <K extends keyof M>(event: K, handler: BusHandler<M[K]>) => () => void;
   /** Subscribe for exactly one emit, then auto-unsubscribe. Returns an
    *  unsubscribe function (to cancel before it fires). */
-  once<K extends keyof M>(event: K, handler: BusHandler<M[K]>): () => void;
+  once: <K extends keyof M>(event: K, handler: BusHandler<M[K]>) => () => void;
   /** Remove a previously-registered handler (no-op if absent). */
-  off<K extends keyof M>(event: K, handler: BusHandler<M[K]>): void;
+  off: <K extends keyof M>(event: K, handler: BusHandler<M[K]>) => void;
   /** Emit an event. Events whose payload is `undefined` are emitted with no
    *  payload argument. */
-  emit<K extends keyof M>(
+  emit: <K extends keyof M>(
     ...args: M[K] extends undefined ? [event: K] : [event: K, payload: M[K]]
-  ): void;
+  ) => void;
   /** Remove all handlers for one event, or all handlers entirely. */
-  clear(event?: keyof M): void;
+  clear: (event?: keyof M) => void;
 }
 
 type AnyHandler = (payload?: unknown) => void;
