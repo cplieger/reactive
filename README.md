@@ -5,9 +5,9 @@
 [![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
-> Signals + DOM-reconciliation micro-framework for TypeScript
+> Signals + collections + DOM-reconciliation micro-framework for TypeScript
 
-A standalone reactive primitives library providing fine-grained signals with automatic dependency tracking, synchronous batched effects, keyed-list DOM reconciliation, structural tree-diffing, a typed per-key reactive store, and a dynamic per-id signal registry (`SignalMap`). The store and `SignalMap` are thin facades over the single signal engine — one reactive core, not several. Zero dependencies beyond the DOM API.
+A standalone reactive app-skeleton: fine-grained signals with automatic dependency tracking and synchronous batched effects, a typed per-key reactive store, a dynamic per-id signal registry (`SignalMap`), a reactive ordered keyed `Collection`, a two-tier list render binding (`bindList`), keyed-list DOM reconciliation, structural tree-diffing, and a typed event bus (`createBus`). The store, `SignalMap`, and `Collection` are thin facades over the single signal engine — one reactive core, not several. The bus is the deliberate counterpart for discrete events (state lives in signals; events go on the bus). Zero dependencies beyond the DOM API.
 
 Mirrors semantics from @preact/signals-core and solid-js reactivity.
 
@@ -92,6 +92,27 @@ isComputed(doubled); // true
 
 - `createStore<M>(): Store<M>` — typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe). A `computed` key whose fn reads its own output throws `Error("Cycle detected")` rather than looping.
 - `SignalMap<V>` — dynamic per-id signal registry: `get(id)`, `ensure(id, initial)`, `clear(id)`, `clearAll()`. For reactive state whose key set isn't known at the type level (per-message streaming text, per-row state, …); complements `createStore`'s fixed key set.
+
+### Collections
+
+A reactive ordered collection of keyed entities — the data half of the two-tier list pattern. A per-entity content update touches only that entity's subscribers; add/remove/reorder bumps the structure signal (`ids`). Built on `signal` + `SignalMap`.
+
+- `createCollection<T>(keyOf: (item: T) => string): Collection<T>` — returns a collection with:
+  - `setAll(items)` — replace everything (same-order replacement does not bump `ids`)
+  - `upsert(item)` / `update(id, next | updater)` / `remove(id)` / `clear()`
+  - `get(id)` / `has(id)` (untracked), `signalFor(id)` (reactive per-entity), `size`
+  - `ids: ReadonlySignal<readonly string[]>` — structure tier (add/remove/reorder only)
+  - `items()` — ordered reactive snapshot (tracks order + every entity)
+
+### List rendering
+
+- `bindList<T>(parent, collection, spec): () => void` — two-tier render binding. One structural effect tracks `collection.ids` and `reconcile`s the row list; each row owns a private effect tracking only its own entity signal, so a per-entity change repaints just that row with no structural reconcile. `spec`: `{ mount(item, id) => HTMLElement; update?(el, item, id); onRemove?(el, id) }` (`update` runs at mount and on every later change). Returns a dispose that tears down the structural effect and every row effect.
+
+### Event bus
+
+State lives in signals; discrete events go on a bus. `createBus` is the typed event primitive (not reactive state — no retained value).
+
+- `createBus<EventMap>(options?): Bus<EventMap>` — `on`/`once`/`off`/`emit`/`clear`. Handlers are snapshot-cached (rebuilt only on mutation; a handler unsubscribed mid-emit still fires for that emit). Events whose payload type is `undefined` emit with no payload argument. A throwing handler is isolated via `options.onError` (default `console.error`).
 
 ## Correctness guarantees
 
