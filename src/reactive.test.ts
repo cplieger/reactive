@@ -482,6 +482,31 @@ describe("patch", () => {
     patch(parent, document.createElement("p"));
     expect(parent.children.length).toBe(1);
   });
+
+  it("keys nodes by data-col (reuses matched nodes across re-patch)", () => {
+    expect.assertions(3);
+    const parent = document.createElement("tr");
+    const title = document.createElement("td");
+    title.setAttribute("data-col", "title");
+    title.textContent = "T";
+    const actions = document.createElement("td");
+    actions.setAttribute("data-col", "actions");
+    actions.textContent = "A";
+    parent.append(title, actions);
+
+    const nTitle = document.createElement("td");
+    nTitle.setAttribute("data-col", "title");
+    nTitle.textContent = "T2";
+    const nActions = document.createElement("td");
+    nActions.setAttribute("data-col", "actions");
+    nActions.textContent = "A2";
+    patch(parent, nTitle, nActions);
+
+    // Matched by data-col → original nodes reused, content patched in place.
+    expect(parent.children[0]).toBe(title);
+    expect(parent.children[1]).toBe(actions);
+    expect(title.textContent).toBe("T2");
+  });
 });
 
 // ---------------------------------------------------------------------------

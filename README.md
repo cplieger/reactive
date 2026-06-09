@@ -7,7 +7,7 @@
 
 > Signals + DOM-reconciliation micro-framework for TypeScript
 
-A standalone reactive primitives library providing fine-grained signals with automatic dependency tracking, synchronous batched effects, keyed-list DOM reconciliation, structural tree-diffing, and a typed per-key reactive store. Zero dependencies beyond the DOM API.
+A standalone reactive primitives library providing fine-grained signals with automatic dependency tracking, synchronous batched effects, keyed-list DOM reconciliation, structural tree-diffing, a typed per-key reactive store, and a dynamic per-id signal registry (`SignalMap`). The store and `SignalMap` are thin facades over the single signal engine — one reactive core, not several. Zero dependencies beyond the DOM API.
 
 Mirrors semantics from @preact/signals-core and solid-js reactivity.
 
@@ -82,13 +82,16 @@ isComputed(doubled); // true
 ### DOM Reconciliation
 
 - `reconcile<T>(parent, items, spec)` — keyed-list DOM reconciliation with mount/update/onRemove lifecycle
-- `patch(parent, ...children)` — structural tree-diff, replacing a parent's children with reconciled new nodes
+- `patch(parent, ...children)` — structural tree-diff, replacing a parent's children with reconciled new nodes. Element nodes are keyed by their first `data-col` or `*-id` attribute (so reorders/re-patches reuse the matched node); unkeyed nodes match by position.
 - `reconcileChildren(parent, newChildren)` — low-level child reconciliation against existing DOM
 - `trackHandler(el, key)` — register an `on*` property for handler reconciliation during tree-diff
 
 ### Store
 
-- `createStore<M>(): Store<M>` — typed per-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch` methods
+`createStore` and `SignalMap` are thin facades over the one signal engine — there is no second reactivity implementation. `createStore` lazily backs each key with a signal; `SignalMap` is a registry of signals keyed by a runtime string id.
+
+- `createStore<M>(): Store<M>` — typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe). A `computed` key whose fn reads its own output throws `Error("Cycle detected")` rather than looping.
+- `SignalMap<V>` — dynamic per-id signal registry: `get(id)`, `ensure(id, initial)`, `clear(id)`, `clearAll()`. For reactive state whose key set isn't known at the type level (per-message streaming text, per-row state, …); complements `createStore`'s fixed key set.
 
 ## Correctness guarantees
 

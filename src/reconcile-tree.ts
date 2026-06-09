@@ -124,7 +124,7 @@ function nodeKey(node: Node): string {
     return "";
   }
   for (const attr of (node as Element).attributes) {
-    if (attr.name.endsWith("-id")) {
+    if (attr.name === "data-col" || attr.name.endsWith("-id")) {
       return `${attr.name}=${attr.value}`;
     }
   }
