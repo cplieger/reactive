@@ -1,0 +1,126 @@
+# Contributing to reactive
+
+`@cplieger/reactive` is a zero-dependency TypeScript reactivity +
+DOM-reconciliation library, published as TS source to both npm and JSR. This
+guide covers the architecture, the local workflow, and the conventions a
+contributor needs; org-wide defaults are inherited from
+[cplieger/.github](https://github.com/cplieger/.github).
+
+## Architecture
+
+There is **one** reactivity engine, in `src/signal.ts`: Preact-style
+doubly-linked source/target edges, pull-based glitch-free refresh, a global
+epoch plus per-node version fast-skip, and bitfield flags. Everything else is a
+thin facade or a consumer of that engine — do not introduce a second
+implementation.
+
+- `signal.ts` — the engine: `signal`, `computed`, `effect`, `batch`,
+  `flushSync`, `untracked`, `on`, `subscribe`, the `isSignal`/`isComputed`
+  guards, and `setEffectErrorHandler`.
+- `store.ts` (`createStore`) and `signal-map.ts` (`SignalMap`) — facades over
+  the engine. `createStore` lazily backs each fixed key with a signal;
+  `SignalMap` is a dynamic per-id signal registry. Because they sit on the one
+  engine, they inherit glitch-freedom and cycle detection.
+- `collection.ts` (`createCollection`) — an ordered keyed collection built on
+  `signal` + `SignalMap`. Two tiers: per-entity signals plus one structure
+  signal (`ids`).
+- `bind-list.ts` (`bindList`) — the two-tier list-to-DOM binding. One
+  structural effect tracks `source.ids` and reconciles the row list; each row
+  owns an isolated effect tracking only its own entity signal.
+- `el.ts` (`el`) — CSP-safe element factory. String children become text nodes
+  (never parsed as HTML).
+- `reconcile.ts` (`reconcile`, `KEY_ATTR`) and `reconcile-tree.ts` (`patch`,
+  `reconcileChildren`, `trackHandler`) — keyed-list reconciliation and
+  structural tree-diffing.
+- `bus.ts` (`createBus`) — the typed event primitive. State lives in signals;
+  discrete events go on the bus.
+
+The public API is whatever `src/index.ts` re-exports — that file is the
+contract. Update it deliberately, and keep the README API section in sync.
+
+### Correctness invariants (protect these)
+
+The dependency-tracking core carries guarantees that tests pin down. When
+touching `signal.ts`, do not regress:
+
+- **Glitch-freedom** — computed values dedup with `Object.is`; downstream
+  effects fire only on a real change. Diamond graphs resolve once.
+- **Cycle detection** — reading a computed mid-computation throws
+  `Error("Cycle detected")`.
+- **Error caching** — a throwing computed caches the error and rethrows until
+  its dependencies change.
+- **Read-only computed** — assigning `.value` on a computed throws.
+- **Synchronous batch** — `batch()` flushes effects synchronously at the end of
+  the outermost batch.
+
+### Unsupported by design
+
+The README's "Unsupported by Design" table is a **contract**, not a backlog:
+effect ownership trees / `createRoot`, nested-effect auto-disposal, `onMount`
+lifecycle, `Signal.subtle.Watcher`, introspection APIs, explicit computed
+disposal, SSR isolation, async signals/resources, transactions, and a custom
+scheduler are all deliberate non-goals. Proposing one of these is a design
+discussion before it is a PR.
+
+## Local development
+
+Requires Node and npm. Install dependencies, then run the checks:
+
+```sh
+npm ci
+npm run typecheck          # tsgo -p tsconfig.json (source only)
+npm run typecheck:tests    # tsgo -p tsconfig.tests.json (includes *.test.ts)
+npm test                   # vitest --run
+npx eslint .               # strict typed-linting (eslint.config.mjs)
+npx prettier --check .     # formatting (printWidth 100)
+```
+
+There is **no build step** — the package ships TypeScript source (`exports`
+points at `./src/index.ts`), so `npm run typecheck` is what stands in for a
+compile. CI runs the same battery centrally via
+[cplieger/ci](https://github.com/cplieger/ci); running the commands above
+locally reproduces it.
+
+### Conventions and gotchas
+
+- **ESM only.** Use `.js` extensions in relative imports (e.g.
+  `from "./signal.js"`) even though the files are `.ts` — that is how
+  `index.ts` and the rest of `src/` are written, and it is required for the
+  TS-source publish to resolve.
+- **Strict TypeScript.** `tsconfig.json` enables `exactOptionalPropertyTypes`,
+  `noUncheckedIndexedAccess`, `noPropertyAccessFromIndexSignature`, and
+  `isolatedModules`, among others. Expect the compiler to be pedantic.
+- **Lint is strict-type-checked.** `no-explicit-any` is an error, `eqeqeq` is
+  enforced, and types must be imported with inline `import type`. Test files
+  get relaxed rules (see the config); production code does not.
+- **Tests live beside source** as `*.test.ts`. Property-based tests use
+  `fast-check`; the `redteam*.test.ts` and `*-adversarial.test.ts` files are
+  deliberate attempts to break the invariants above — if you change the engine,
+  run them and add cases rather than weakening them.
+- **DOM tests** run under `happy-dom` (configured in `vitest.config.ts`), so
+  DOM globals are available in tests without a browser.
+
+## Publishing
+
+Releases are automated. A push to `main` triggers the central release pipeline,
+which computes the version from commit history with git-cliff and publishes to
+npm and JSR. Per `cliff.toml`, this is a stable (1.x+) repo: `feat` bumps minor,
+breaking changes bump major, and `chore`/`ci`/`docs`/`style`/`test`/`fuzz`/
+`lint` commits do not cut a release. Do not bump `version` in `package.json` /
+`jsr.json` by hand.
+
+## Commits and PRs
+
+Branch from `main`, keep changes focused with tests, and open a PR. Commit
+messages follow [Conventional Commits](https://www.conventionalcommits.org/) —
+git-cliff parses them for the changelog and version bump, so write the subject
+as the changelog line you want (`feat: add prepend to collections`,
+`fix: dedup diamond updates in computed`).
+
+## Conduct & security
+
+By participating you agree to the
+[Code of Conduct](https://github.com/cplieger/.github/blob/main/CODE_OF_CONDUCT.md).
+Report security issues through the
+[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md) —
+never in a public issue.
