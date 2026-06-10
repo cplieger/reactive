@@ -1,13 +1,17 @@
-// Typed per-key reactive store with auto-tracked effects, computed, and batching.
+// Typed per-key reactive store — a thin facade over the signal engine.
+//
+// Each key is backed by a lazily-created signal, so the store inherits the
+// engine's glitch-freedom, cycle detection, batching, and error handling.
+// There is NO separate reactivity implementation here: get/set read and
+// write signals, effect/batch are the engine's own, and auto-tracking falls
+// out of reading `signal.value` inside an effect.
 //
 // Usage:
 //   import { createStore } from './store.js';
 //   interface MyMap { count: number; name: string }
 //   const { get, set, subscribe, effect, computed, batch } = createStore<MyMap>();
 
-type Callback = (value: unknown) => void;
-// eslint-disable-next-line @typescript-eslint/no-invalid-void-type -- void is intentional for effect return
-type Cleanup = void | (() => void);
+import { signal, effect, batch, type Signal, type Cleanup } from "./signal.js";
 
 /** A typed per-key reactive store with auto-tracked effects, computed, and batching. */
 export interface Store<M> {
@@ -19,141 +23,51 @@ export interface Store<M> {
   batch(fn: () => void): void;
 }
 
-/** Create a typed reactive store. Keys are auto-tracked in effects; writes notify subscribers. */
+/** Create a typed reactive store. Keys are lazily backed by signals; reading a
+ *  key inside an effect auto-tracks it, and writes notify through the engine. */
 export function createStore<M>(): Store<M> {
-  const state: Record<string, unknown> = {};
-  const subscribers: Record<string, Callback[]> = {};
+  const sigs = new Map<string, Signal<unknown>>();
 
-  let tracking: Set<string> | null = null;
-  let batchDepth = 0;
-  let pendingKeys: Map<string, unknown> | null = null;
-
-  function notifySubs(key: string, value: unknown): void {
-    const cbs = subscribers[key];
-    if (!cbs) {
-      return;
+  function sigFor<K extends keyof M & string>(key: K): Signal<M[K]> {
+    let s = sigs.get(key);
+    if (s === undefined) {
+      // Unset keys read as `undefined` (matching a sparse record) until first set.
+      s = signal<unknown>(undefined);
+      sigs.set(key, s);
     }
-    for (const cb of cbs) {
-      try {
-        cb(value);
-      } catch (e) {
-        console.error("store subscriber error:", e);
-      }
-    }
+    return s as Signal<M[K]>;
   }
 
   function get<K extends keyof M & string>(key: K): M[K] {
-    if (tracking) {
-      tracking.add(key);
-    }
-    return state[key] as M[K];
+    return sigFor(key).value;
   }
 
   function set<K extends keyof M & string>(key: K, value: M[K]): void {
-    const prev = state[key];
-    state[key] = value;
-    if (Object.is(prev, value)) {
-      return;
-    }
-    if (batchDepth > 0) {
-      pendingKeys ??= new Map();
-      pendingKeys.set(key, value);
-    } else {
-      notifySubs(key, value);
-    }
+    sigFor(key).value = value;
   }
 
+  // Notify on change only (not immediately on subscribe) — the engine's
+  // `subscribe` fires immediately, so skip the initial effect run.
   function subscribe<K extends keyof M & string>(key: K, cb: (value: M[K]) => void): () => void {
-    subscribers[key] ??= [];
-    subscribers[key].push(cb as Callback);
-    return () => {
-      const arr = subscribers[key];
-      if (arr) {
-        subscribers[key] = arr.filter((c) => c !== cb);
-      }
-    };
-  }
-
-  function storeBatch(fn: () => void): void {
-    batchDepth++;
-    try {
-      fn();
-    } finally {
-      batchDepth--;
-      if (batchDepth === 0 && pendingKeys) {
-        const p = pendingKeys;
-        pendingKeys = null;
-        for (const [k, v] of p) {
-          notifySubs(k, v);
-        }
-      }
-    }
-  }
-
-  function storeEffect(fn: () => Cleanup): () => void {
-    let unsubs: (() => void)[] = [];
-    let cleanup: Cleanup;
-    let disposed = false;
-
-    const run = (): void => {
-      if (disposed) {
+    const s = sigFor(key);
+    let primed = false;
+    return effect(() => {
+      const v = s.value;
+      if (!primed) {
+        primed = true;
         return;
       }
-      for (const u of unsubs) {
-        u();
-      }
-      unsubs = [];
-      if (cleanup) {
-        const c = cleanup;
-        cleanup = undefined;
-        try {
-          c();
-        } catch (e) {
-          console.error("store effect cleanup error:", e);
-        }
-      }
-      const prev = tracking;
-      tracking = new Set();
-      try {
-        cleanup = fn();
-      } catch (e) {
-        console.error("store effect error:", e);
-      }
-      const deps = tracking;
-      tracking = prev;
-      for (const dep of deps) {
-        unsubs.push(
-          subscribe(dep as keyof M & string, run as (value: M[keyof M & string]) => void),
-        );
-      }
-    };
-    run();
-    return () => {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
-      for (const u of unsubs) {
-        u();
-      }
-      unsubs = [];
-      if (cleanup) {
-        const c = cleanup;
-        cleanup = undefined;
-        try {
-          c();
-        } catch (e) {
-          console.error("store effect cleanup error:", e);
-        }
-      }
-    };
+      cb(v);
+    });
   }
 
+  // A derived key: an effect that writes `outputKey` from `fn`. If `fn` reads
+  // `outputKey` the engine throws "Cycle detected" rather than looping.
   function computed<K extends keyof M & string>(outputKey: K, fn: () => M[K]): () => void {
-    return storeEffect(() => {
+    return effect(() => {
       set(outputKey, fn());
     });
   }
 
-  return { get, set, subscribe, effect: storeEffect, computed, batch: storeBatch };
+  return { get, set, subscribe, effect, computed, batch };
 }
