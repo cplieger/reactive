@@ -3,6 +3,7 @@
 [![CI](https://github.com/cplieger/reactive/actions/workflows/ci.yaml/badge.svg)](https://github.com/cplieger/reactive/actions/workflows/ci.yaml)
 [![npm](https://img.shields.io/npm/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive)
 [![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/reactive/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/reactive)
 [![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-blue.svg)](LICENSE)
 
 > Signals + collections + DOM-reconciliation micro-framework for TypeScript
