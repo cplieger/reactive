@@ -1,11 +1,11 @@
 # reactive
 
-[![CI](https://github.com/cplieger/reactive/actions/workflows/ci.yaml/badge.svg)](https://github.com/cplieger/reactive/actions/workflows/ci.yaml)
 [![npm](https://img.shields.io/npm/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive)
 [![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/reactive/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/reactive)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/reactive/badges/coverage.json)](https://github.com/cplieger/reactive/actions/workflows/coverage.yml)
+[![Node version](https://img.shields.io/node/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive)
+[![Test coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/reactive/badges/coverage.json)](https://github.com/cplieger/reactive/actions/workflows/coverage.yml)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/13218/badge)](https://www.bestpractices.dev/projects/13218)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/cplieger/reactive/badge)](https://scorecard.dev/viewer/?uri=github.com/cplieger/reactive)
 
 > Signals + collections + DOM-reconciliation micro-framework for TypeScript
 
