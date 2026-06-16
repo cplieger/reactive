@@ -1593,4 +1593,29 @@ describe("on", () => {
       { val: 3, prev: 2, prevResult: expect.any(Function) },
     ]);
   });
+
+  it("non-defer return type is U; defer form widens to U | undefined (type-level)", () => {
+    // Non-deferred single-accessor: accessor return is U (number), not U | undefined.
+    const nonDefer = on(
+      () => 1,
+      (v) => v * 2,
+    );
+    const r1: number = nonDefer();
+    expect(r1).toBe(2);
+
+    // Array form is likewise non-undefined and correlates value to unknown[].
+    const arr = on([() => 1, () => 2], (vals) => vals.length);
+    const r2: number = arr();
+    expect(r2).toBe(2);
+
+    // Deferred form widens to U | undefined: the assignment to `number` must fail.
+    const deferred = on(
+      () => 1,
+      (v) => v * 2,
+      { defer: true },
+    );
+    // @ts-expect-error defer form returns U | undefined, not assignable to number
+    const r3: number = deferred();
+    expect(r3).toBeUndefined();
+  });
 });
