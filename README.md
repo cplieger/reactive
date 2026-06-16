@@ -74,7 +74,7 @@ isComputed(doubled); // true
 - `batch(fn)` — coalesce signal writes; effects flush synchronously at end of outermost batch
 - `flushSync()` — synchronously drain pending effects (no-op inside batch)
 - `untracked<T>(fn): T` — run fn without tracking signal reads (like Preact `untracked()` / Solid `untrack()`)
-- `on(deps, fn, options?): () => U | undefined` — explicit dependency declaration helper (like Solid `on()`). Pass into `effect()` or `computed()`.
+- `on(deps, fn, options?): () => U` — explicit dependency declaration helper (like Solid `on()`). Returns `() => U`; with `{ defer: true }` the accessor returns `() => U | undefined` (the deferred first call yields `undefined`). A single accessor `() => T` types `value`/`prev` as `T`; an array of accessors types them as `unknown[]`. Pass into `effect()` or `computed()`.
 - `subscribe(signal, cb): () => void` — subscribe to a signal, calling cb immediately and on every change
 - `isSignal(value): boolean` — type guard for signals created by `signal()`
 - `isComputed(value): boolean` — type guard for computed signals

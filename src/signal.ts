@@ -662,7 +662,39 @@ export function isComputed(value: unknown): value is ReadonlySignal<unknown> {
   return value !== null && typeof value === "object" && COMPUTED_BRAND in value;
 }
 
-/** Explicit dependency declaration helper. Mirrors Solid's on(). */
+/** Explicit dependency declaration helper. Mirrors Solid's on().
+ *
+ * Overloaded so the return type and the `value`/`prev` parameter types stay
+ * tight:
+ *   - Without `defer` (or `{ defer: false }`) the accessor always returns `U`;
+ *     only the `{ defer: true | boolean }` form widens to `U | undefined`
+ *     (the deferred first call yields `undefined`).
+ *   - A single accessor `() => T` correlates `value`/`prev` to `T`; an array of
+ *     accessors correlates them to `unknown[]`. */
+// Single accessor, non-deferred (or explicit `{ defer: false }`): never undefined.
+export function on<T, U>(
+  deps: () => T,
+  fn: (value: T, prev: T | undefined, prevResult: U | undefined) => U,
+  options?: { defer?: false },
+): () => U;
+// Single accessor, deferred: first call returns undefined.
+export function on<T, U>(
+  deps: () => T,
+  fn: (value: T, prev: T | undefined, prevResult: U | undefined) => U,
+  options: { defer: boolean },
+): () => U | undefined;
+// Array of accessors, non-deferred (or explicit `{ defer: false }`): never undefined.
+export function on<U>(
+  deps: (() => unknown)[],
+  fn: (value: unknown[], prev: unknown[] | undefined, prevResult: U | undefined) => U,
+  options?: { defer?: false },
+): () => U;
+// Array of accessors, deferred: first call returns undefined.
+export function on<U>(
+  deps: (() => unknown)[],
+  fn: (value: unknown[], prev: unknown[] | undefined, prevResult: U | undefined) => U,
+  options: { defer: boolean },
+): () => U | undefined;
 export function on<T, U>(
   deps: (() => T) | (() => unknown)[],
   fn: (value: T | unknown[], prev: T | unknown[] | undefined, prevResult: U | undefined) => U,
