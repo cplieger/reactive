@@ -75,6 +75,11 @@ npx eslint .               # strict typed-linting (eslint.config.mjs)
 npx prettier --check .     # formatting (printWidth 100)
 ```
 
+The `typecheck` scripts run `tsgo` (the TypeScript 7 native compiler), which is
+not a package dependency: install it once (`npm i -g @typescript/native-preview`)
+or substitute `npx tsc -p tsconfig.json` locally (the `typescript` devDependency
+provides `tsc`; `tsgo` is the source of truth that CI runs).
+
 There is **no build step** — the package ships TypeScript source (`exports`
 points at `./src/index.ts`), so `npm run typecheck` is what stands in for a
 compile. CI runs the same battery centrally via
@@ -93,10 +98,11 @@ locally reproduces it.
 - **Lint is strict-type-checked.** `no-explicit-any` is an error, `eqeqeq` is
   enforced, and types must be imported with inline `import type`. Test files
   get relaxed rules (see the config); production code does not.
-- **Tests live beside source** as `*.test.ts`. Property-based tests use
-  `fast-check`; the `redteam*.test.ts` and `*-adversarial.test.ts` files are
-  deliberate attempts to break the invariants above — if you change the engine,
-  run them and add cases rather than weakening them.
+- **Tests live beside source** as `*.test.ts`, with property-based suites in
+  `*.property.test.ts` (via `fast-check`). The signal-engine suites
+  (`signal*.test.ts` and `signal.property.test.ts`) deliberately probe the
+  invariants above; if you change the engine, run them and add cases rather
+  than weakening them.
 - **DOM tests** run under `happy-dom` (configured in `vitest.config.ts`), so
   DOM globals are available in tests without a browser.
 
@@ -104,10 +110,11 @@ locally reproduces it.
 
 Releases are automated. A push to `main` triggers the central release pipeline,
 which computes the version from commit history with git-cliff and publishes to
-npm and JSR. Per `cliff.toml`, this is a stable (1.x+) repo: `feat` bumps minor,
+npm and JSR. Per `cliff.toml`, releases follow standard semver: `feat` bumps minor,
 breaking changes bump major, and `chore`/`ci`/`docs`/`style`/`test`/`fuzz`/
-`lint` commits do not cut a release. Do not bump `version` in `package.json` /
-`jsr.json` by hand.
+`lint` commits do not cut a release. The published version is derived from the
+git tag at release time, so the `version` field in `package.json` / `jsr.json`
+is only a baseline; do not bump it by hand.
 
 ## Commits and PRs
 
