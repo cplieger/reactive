@@ -44,7 +44,12 @@ export function reconcile<T>(
         spec.update(el, item);
       }
     }
-    parent.insertBefore(el, target);
+    // Skip the move when el is already at its target position: re-inserting a node
+    // that is already correctly placed still detaches+reattaches it in the DOM,
+    // which blurs a focused input / drops a text selection inside that row.
+    if (el.parentNode !== parent || el.nextSibling !== target) {
+      parent.insertBefore(el, target);
+    }
     target = el;
   }
 

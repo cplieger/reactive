@@ -877,3 +877,44 @@ describe("reconcile: a throwing lifecycle callback propagates", () => {
     }).toThrow("onRemove-throw");
   });
 });
+
+describe("reconcile: in-place move guard (focus preservation)", () => {
+  it("keeps focus in a row whose content updates while its position is unchanged", () => {
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const spec = {
+      key: (i: { id: string; v: number }) => i.id,
+      mount: (i: { id: string; v: number }) => {
+        const input = document.createElement("input");
+        input.value = String(i.v);
+        return input;
+      },
+      update: (el: HTMLElement, i: { id: string; v: number }) => {
+        (el as HTMLInputElement).value = String(i.v);
+      },
+    };
+    reconcile(
+      parent,
+      [
+        { id: "a", v: 1 },
+        { id: "b", v: 2 },
+      ],
+      spec,
+    );
+    const inputA = parent.children[0] as HTMLInputElement;
+    inputA.focus();
+    expect(document.activeElement).toBe(inputA);
+    // Content-only change, same order: row "a" must NOT be re-inserted. Re-inserting
+    // an already-positioned node detaches+reattaches it, which blurs the focused input.
+    reconcile(
+      parent,
+      [
+        { id: "a", v: 9 },
+        { id: "b", v: 2 },
+      ],
+      spec,
+    );
+    expect(document.activeElement).toBe(inputA);
+    parent.remove();
+  });
+});
