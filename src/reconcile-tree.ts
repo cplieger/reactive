@@ -24,10 +24,10 @@ export function patch(
     if (child == null) {
       continue;
     }
-    if ((child as Node).nodeType === 11) {
-      newChildren.push(...Array.from((child as Node).childNodes));
-    } else if (typeof child === "string") {
+    if (typeof child === "string") {
       newChildren.push(document.createTextNode(child));
+    } else if (child.nodeType === 11) {
+      newChildren.push(...Array.from(child.childNodes));
     } else {
       newChildren.push(child);
     }
@@ -58,9 +58,15 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
     if (matched) {
       oldByKey.delete(newKey);
     } else if (!newKey) {
+      // Unkeyed new node: match the next UNKEYED old node by position, advancing
+      // past keyed old nodes (which are reserved for key-based matching) and any
+      // already-consumed slots. This mirrors the documented contract ("unkeyed
+      // nodes match by position, skipping keyed nodes") and React/Preact's
+      // keyed+positional reconciliation. Stopping at (and matching) a keyed old
+      // node would corrupt a node that key-matching also reuses in the same pass.
       while (oldIdx < oldChildren.length) {
         const oc = oldChildren[oldIdx];
-        if (oc === undefined || nodeKey(oc)) {
+        if (oc !== undefined && !nodeKey(oc)) {
           break;
         }
         oldIdx++;
@@ -78,7 +84,17 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
     }
 
     if (!canPatch(matched, newChild)) {
-      parent.replaceChild(newChild, matched);
+      // Insert the replacement at the target index i, then drop the mismatched
+      // old node — which may NOT be at index i. The positional scan lets an
+      // unkeyed new node match a positionally-later unkeyed old node while an
+      // unconsumed keyed old node sits ahead of it, so `matched` can be at a
+      // position > i. replaceChild would leave newChild at matched's position;
+      // a later insert then pushes it past newChildren.length and the trailing
+      // removal loop deletes it, dropping the new node and leaving the stale
+      // keyed node. The insert and patch branches already target index i.
+      const ref = parent.childNodes.item(i);
+      parent.insertBefore(newChild, ref);
+      parent.removeChild(matched);
       continue;
     }
 
