@@ -140,4 +140,45 @@ describe("bindList", () => {
     expect(counts.update).toBe(updatesBefore); // per-row effect disposed
     expect(parent.children[0]?.textContent).toBe("1"); // unchanged
   });
+
+  it("immutable rows (spec without `update`): no per-row effect, content changes do not repaint", () => {
+    const parent = document.createElement("div");
+    const coll = createCollection<Row>(keyOf);
+    let mountCount = 0;
+    const dispose = bindList(parent, coll, {
+      mount: (item, id) => {
+        mountCount++;
+        const el = document.createElement("div");
+        el.setAttribute("data-row", id);
+        el.textContent = String(item.n);
+        return el;
+      },
+    });
+    coll.setAll([{ id: "a", n: 1 }]);
+    expect(parent.children[0]?.textContent).toBe("1");
+    expect(mountCount).toBe(1);
+    coll.update("a", { id: "a", n: 99 });
+    expect(parent.children[0]?.textContent).toBe("1");
+    expect(mountCount).toBe(1);
+    dispose();
+  });
+
+  it("mount tolerates a source whose signalFor returns undefined for a listed id", () => {
+    const parent = document.createElement("div");
+    const ids = signal<readonly string[]>(["ghost"]);
+    const source = { ids, signalFor: (): undefined => undefined };
+    const dispose = bindList(parent, source, {
+      mount: (_item, id) => {
+        const el = document.createElement("div");
+        el.setAttribute("data-row", id);
+        return el;
+      },
+      update: (el, _item, id) => {
+        el.setAttribute("data-updated", id);
+      },
+    });
+    expect(parent.children[0]?.getAttribute("data-row")).toBe("ghost");
+    expect(parent.children[0]?.hasAttribute("data-updated")).toBe(false);
+    dispose();
+  });
 });

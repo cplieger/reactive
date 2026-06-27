@@ -61,8 +61,11 @@ export function createStore<M>(): Store<M> {
     });
   }
 
-  // A derived key: an effect that writes `outputKey` from `fn`. If `fn` reads
-  // `outputKey` the engine throws "Cycle detected" rather than looping.
+  // A derived key: an effect that writes `outputKey` from `fn`. A `fn` that reads
+  // `outputKey` and yields a new value each run trips the engine's batch-iteration
+  // guard after ~100 re-runs, surfacing Error("Cycle detected") through the effect
+  // error handler (effects isolate errors, so it is NOT rethrown to the caller); a
+  // self-read that returns a stable value settles via Object.is dedup without looping.
   function computed<K extends keyof M & string>(outputKey: K, fn: () => M[K]): () => void {
     return effect(() => {
       set(outputKey, fn());
