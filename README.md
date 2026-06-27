@@ -92,7 +92,7 @@ isComputed(doubled); // true
 
 `createStore` and `SignalMap` are thin facades over the one signal engine — there is no second reactivity implementation. `createStore` lazily backs each key with a signal; `SignalMap` is a registry of signals keyed by a runtime string id.
 
-- `createStore<M>(): Store<M>` — typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe). A `computed` key whose fn reads its own output throws `Error("Cycle detected")` rather than looping.
+- `createStore<M>(): Store<M>` — typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe). A `computed` key whose fn reads its own output does not loop unbounded: a self-read that keeps yielding new values trips the engine's batch-iteration guard and surfaces `Error("Cycle detected")` through the effect error handler (effects isolate errors, so it is not rethrown to the caller), while a stable self-read settles via `Object.is` dedup.
 - `SignalMap<V>` — dynamic per-id signal registry: `get(id)`, `ensure(id, initial)`, `clear(id)`, `clearAll()`. For reactive state whose key set isn't known at the type level (per-message streaming text, per-row state, …); complements `createStore`'s fixed key set.
 
 ### Collections
