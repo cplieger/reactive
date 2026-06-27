@@ -8,11 +8,9 @@ const COMPUTED_BRAND = Symbol("computed");
 
 // --- Bitfield flags ---
 const DIRTY = 1;
-const CHECK = 2;
 const RUNNING = 4;
 const DISPOSED = 8;
 const HAS_ERROR = 16;
-const TRACKING = 32;
 const NOTIFIED = 64;
 
 // --- Linked-list Node for source↔target edges ---
@@ -66,6 +64,10 @@ let batchDepth = 0;
 let batchedEffect: EffectNode | undefined;
 let batchIteration = 0;
 let globalVersion = 0;
+
+// Max effect-scheduling passes within one endBatch before assuming a cyclic
+// effect-write loop and bailing with "Cycle detected".
+const MAX_BATCH_ITERATIONS = 100;
 
 // --- Effect error handler ---
 /** Cleanup function returned by an effect callback, called before re-execution or disposal. */
@@ -235,7 +237,7 @@ function needsToRecompute(target: TargetNode): boolean {
     const source = node._source;
     if (source._isComputed) {
       const comp = source as unknown as ComputedNode;
-      if (comp._flags & (DIRTY | CHECK)) {
+      if (comp._flags & DIRTY) {
         refreshComputed(comp);
       }
       if (comp._flags & HAS_ERROR) {
@@ -257,42 +259,15 @@ function refreshComputed(comp: ComputedNode): void {
   }
 
   // Fast-path: nothing changed globally since last check
-  if (comp._globalVersion === globalVersion && !(comp._flags & (DIRTY | CHECK))) {
+  if (comp._globalVersion === globalVersion && !(comp._flags & DIRTY)) {
     return;
   }
   comp._globalVersion = globalVersion;
 
-  // If not dirty but CHECK, verify sources first
-  if (!(comp._flags & DIRTY) && comp._flags & CHECK) {
-    let sn = comp._sources;
-    while (sn !== undefined) {
-      const src = sn._source;
-      if (src._isComputed) {
-        const srcComp = src as unknown as ComputedNode;
-        if (srcComp._flags & (DIRTY | CHECK)) {
-          refreshComputed(srcComp);
-        }
-        if (srcComp._flags & HAS_ERROR) {
-          comp._flags |= DIRTY;
-          break;
-        }
-      }
-      if (src._version !== sn._version) {
-        comp._flags |= DIRTY;
-        break;
-      }
-      sn = sn._nextSource;
-    }
-    if (!(comp._flags & DIRTY)) {
-      comp._flags &= ~CHECK;
-      return;
-    }
-  }
-
   const prevContext = evalContext;
   evalContext = comp;
   const prevFlags = comp._flags;
-  comp._flags = RUNNING | TRACKING;
+  comp._flags = RUNNING;
 
   prepareSources(comp);
 
@@ -304,7 +279,7 @@ function refreshComputed(comp: ComputedNode): void {
     // PATH A: fn() threw — cache the error
     fnThrew = true;
     comp._value = err;
-    comp._flags = HAS_ERROR | TRACKING;
+    comp._flags = HAS_ERROR;
     comp._version++;
     // Keep old deps (version=-1 nodes) so computed retries when sources change.
     let sn = comp._sources;
@@ -318,7 +293,7 @@ function refreshComputed(comp: ComputedNode): void {
     evalContext = prevContext;
     cleanupSources(comp);
     if (!fnThrew) {
-      comp._flags = (comp._flags & ~RUNNING) | TRACKING;
+      comp._flags = comp._flags & ~RUNNING;
     }
   }
 
@@ -364,7 +339,7 @@ function endBatch(): void {
     let eff: EffectNode | undefined = batchedEffect;
     batchedEffect = undefined;
     batchIteration++;
-    if (batchIteration > 100) {
+    if (batchIteration > MAX_BATCH_ITERATIONS) {
       batchIteration = 0;
       throw new Error("Cycle detected");
     }
@@ -391,8 +366,7 @@ function endBatch(): void {
   }
 }
 
-function runEffect(eff: EffectNode): void {
-  // Run cleanup first (untracked)
+function runCleanup(eff: EffectNode): void {
   if (eff._cleanup) {
     const c = eff._cleanup;
     eff._cleanup = undefined;
@@ -406,6 +380,11 @@ function runEffect(eff: EffectNode): void {
       evalContext = prevContext;
     }
   }
+}
+
+function runEffect(eff: EffectNode): void {
+  // Run cleanup first (untracked)
+  runCleanup(eff);
 
   // Track dependencies
   const prevContext = evalContext;
@@ -426,19 +405,7 @@ function runEffect(eff: EffectNode): void {
 
 function disposeEffect(eff: EffectNode): void {
   // Run cleanup (untracked)
-  if (eff._cleanup) {
-    const c = eff._cleanup;
-    eff._cleanup = undefined;
-    const prevContext = evalContext;
-    evalContext = undefined;
-    try {
-      c();
-    } catch (e) {
-      safeCallHandler(e);
-    } finally {
-      evalContext = prevContext;
-    }
-  }
+  runCleanup(eff);
 
   // Unsubscribe from all sources
   let node = eff._sources;
@@ -533,7 +500,7 @@ export function computed<T>(fn: () => T, options?: SignalOptions<T>): ReadonlySi
     _targets: undefined,
     _isComputed: true,
     // TargetNode fields
-    _flags: DIRTY | TRACKING,
+    _flags: DIRTY,
     _sources: undefined,
     // ComputedNode-specific fields
     _fn: fn,
@@ -550,7 +517,7 @@ export function computed<T>(fn: () => T, options?: SignalOptions<T>): ReadonlySi
         throw new Error("Cycle detected");
       }
       // Refresh before tracking (pull-based glitch-free)
-      if (node._flags & (DIRTY | CHECK)) {
+      if (node._flags & DIRTY) {
         refreshComputed(node);
       }
       const dep = addDependency(node);
@@ -567,7 +534,7 @@ export function computed<T>(fn: () => T, options?: SignalOptions<T>): ReadonlySi
     },
     peek(): T {
       // F6: refresh WITHOUT tracking
-      if (node._flags & (DIRTY | CHECK)) {
+      if (node._flags & DIRTY) {
         const prevContext = evalContext;
         evalContext = undefined;
         try {

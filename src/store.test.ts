@@ -1,6 +1,6 @@
 // Typed per-key reactive store (facade over the signal engine).
 import { describe, it, expect, vi } from "vitest";
-import { createStore } from "./index.js";
+import { createStore, setEffectErrorHandler } from "./index.js";
 
 describe("createStore", () => {
   it("get/set round-trip", () => {
@@ -402,5 +402,34 @@ describe("createStore: subscriber throw during batch", () => {
     store.set("b", 3);
     expect(spy).toHaveBeenCalledWith(3);
     consoleSpy.mockRestore();
+  });
+});
+
+describe("createStore: self-read computed cycle detection", () => {
+  it("a self-read computed yielding a new value each run surfaces Cycle detected via the error handler, not the caller", () => {
+    const errors: unknown[] = [];
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
+    const store = createStore<{ k: number }>();
+    store.set("k", 0);
+    expect(() => {
+      store.computed("k", () => store.get("k") + 1);
+    }).not.toThrow();
+    setEffectErrorHandler(prev);
+    expect(errors.some((e) => e instanceof Error && /Cycle detected/.test(e.message))).toBe(true);
+  });
+
+  it("a self-read computed returning a stable value settles without looping", () => {
+    const errors: unknown[] = [];
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
+    const store = createStore<{ k: number }>();
+    store.set("k", 7);
+    store.computed("k", () => store.get("k"));
+    setEffectErrorHandler(prev);
+    expect(errors.length).toBe(0);
+    expect(store.get("k")).toBe(7);
   });
 });

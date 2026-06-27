@@ -2,7 +2,7 @@
 // stays consistent when a computed fn or a custom equals comparator throws.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { signal, effect, batch, computed, setEffectErrorHandler } from "./index.js";
-import type { EffectErrorHandler } from "./index.js";
+import type { EffectErrorHandler, ReadonlySignal } from "./index.js";
 
 describe("custom equals throwing", () => {
   it("signal: exception in equals propagates to caller", () => {
@@ -242,5 +242,33 @@ describe("signal equals throw inside a nested batch", () => {
     s.value = 7;
     expect(spy).toHaveBeenCalledWith(7);
     setEffectErrorHandler(prev);
+  });
+});
+
+describe("computed: cycle detection", () => {
+  it("reading a computed that reads itself throws Cycle detected", () => {
+    const c: ReadonlySignal<number> = computed(() => c.value + 1);
+    expect(() => c.value).toThrow("Cycle detected");
+  });
+
+  it("peek on a self-referential computed also throws Cycle detected", () => {
+    const c: ReadonlySignal<number> = computed(() => c.value + 1);
+    expect(() => c.peek()).toThrow("Cycle detected");
+  });
+
+  it("an indirect cycle a -> b -> a throws Cycle detected", () => {
+    const a: ReadonlySignal<number> = computed(() => b.value + 1);
+    const b: ReadonlySignal<number> = computed(() => a.value + 1);
+    expect(() => a.value).toThrow("Cycle detected");
+  });
+
+  it("the graph remains usable after a cycle is hit", () => {
+    const c: ReadonlySignal<number> = computed(() => c.value + 1);
+    expect(() => c.value).toThrow("Cycle detected");
+    const s = signal(2);
+    const ok = computed(() => s.value * 10);
+    expect(ok.value).toBe(20);
+    s.value = 3;
+    expect(ok.value).toBe(30);
   });
 });
