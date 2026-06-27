@@ -51,12 +51,11 @@ export function el(
       }
       if (k === "className") {
         e.className = v as string;
-      } else if (k.startsWith("on")) {
+      } else if (/^on/i.test(k)) {
         (e as unknown as Record<string, unknown>)[k] = v;
         trackHandler(e, k);
-      } else if (BOOL_PROPS.has(k)) {
-        (e as unknown as Record<string, unknown>)[k] = v;
-      } else if (VALUE_PROPS.has(k)) {
+      } else if (BOOL_PROPS.has(k) || VALUE_PROPS.has(k)) {
+        // Both sets are assigned as DOM properties, not attributes.
         (e as unknown as Record<string, unknown>)[k] = v;
       } else {
         e.setAttribute(k, String(v));
