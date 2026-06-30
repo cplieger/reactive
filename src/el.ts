@@ -8,12 +8,7 @@ import { trackHandler } from "./reconcile-tree.js";
 /** A value for an element attribute/property/handler. Functions are treated as
  *  event handlers when the key starts with `on`. */
 export type AttrValue =
-  | string
-  | number
-  | boolean
-  | null
-  | undefined
-  | ((...args: never[]) => unknown);
+  string | number | boolean | null | undefined | ((...args: never[]) => unknown);
 
 // Keys set as DOM *properties* (not attributes) because the attribute form
 // either doesn't reflect (value/checked) or is awkward (boolean presence).
