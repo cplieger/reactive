@@ -131,7 +131,7 @@ The following features are intentionally NOT implemented:
 
 | Feature                                       | Reason                                                                                                             |
 | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| **Effect ownership tree / `createRoot`**      | Consumers manage disposal explicitly. Adding ownership adds ~150 LOC of complexity and changes the mental model.   |
+| **Effect ownership tree / `createRoot`**      | Consumers manage disposal explicitly. Adding ownership changes the mental model.                                   |
 | **Nested effect auto-disposal**               | Each effect is independent and returns its own dispose function. Compose with arrays or helper functions.          |
 | **Lazy activation / `onMount` lifecycle**     | Signals are always active. Resource management is the consumer's responsibility.                                   |
 | **`Signal.subtle.Watcher` / notify-on-dirty** | This library IS the framework layer. The Watcher pattern is for frameworks that sit on top of a signals primitive. |
@@ -141,6 +141,12 @@ The following features are intentionally NOT implemented:
 | **Async signals / resources**                 | Out of scope. Use effects + manual signal writes for async data loading.                                           |
 | **Transactions**                              | Framework-level concern. Not a signals primitive.                                                                  |
 | **Custom scheduler / `setScheduler()`**       | Batch is synchronous. No scheduler needed.                                                                         |
+
+## Disclaimer
+
+This project is built with care and follows security best practices, but it is intended for personal / self-hosted use. No guarantees of fitness for production environments. Use at your own risk.
+
+This project was built with AI-assisted tooling using [Claude Opus](https://www.anthropic.com/claude) and [Kiro](https://kiro.dev). The human maintainer defines architecture, supervises implementation, and makes all final decisions.
 
 ## License
 
