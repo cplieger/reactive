@@ -40,27 +40,15 @@ contract. Update it deliberately, and keep the README API section in sync.
 
 ### Correctness invariants (protect these)
 
-The dependency-tracking core carries guarantees that tests pin down. When
-touching `signal.ts`, do not regress:
-
-- **Glitch-freedom** — computed values dedup with `Object.is`; downstream
-  effects fire only on a real change. Diamond graphs resolve once.
-- **Cycle detection** — reading a computed mid-computation throws
-  `Error("Cycle detected")`.
-- **Error caching** — a throwing computed caches the error and rethrows until
-  its dependencies change.
-- **Read-only computed** — assigning `.value` on a computed throws.
-- **Synchronous batch** — `batch()` flushes effects synchronously at the end of
-  the outermost batch.
+The dependency-tracking core carries guarantees that tests pin down: the five
+[correctness guarantees](README.md#correctness-guarantees) documented in the
+README. Don't regress these when touching `signal.ts`.
 
 ### Unsupported by design
 
-The README's "Unsupported by Design" table is a **contract**, not a backlog:
-effect ownership trees / `createRoot`, nested-effect auto-disposal, `onMount`
-lifecycle, `Signal.subtle.Watcher`, introspection APIs, explicit computed
-disposal, SSR isolation, async signals/resources, transactions, and a custom
-scheduler are all deliberate non-goals. Proposing one of these is a design
-discussion before it is a PR.
+The README's ["Unsupported by Design" table](README.md#design-decisions--unsupported-by-design)
+is a **contract**, not a backlog: those deliberate non-goals are a design
+discussion before they are a PR.
 
 ## Local development
 
