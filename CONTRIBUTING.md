@@ -56,17 +56,19 @@ Requires Node and npm. Install dependencies, then run the checks:
 
 ```sh
 npm ci
-npm run typecheck          # tsgo -p tsconfig.json (source only)
-npm run typecheck:tests    # tsgo -p tsconfig.tests.json (includes *.test.ts)
+npm run typecheck          # tsc -p tsconfig.json (source only)
+npm run typecheck:tests    # tsc -p tsconfig.tests.json (includes *.test.ts)
 npm test                   # vitest --run
 npx eslint .               # strict typed-linting (eslint.config.mjs)
 npx prettier --check .     # formatting (printWidth 100)
 ```
 
-The `typecheck` scripts run `tsgo` (the TypeScript 7 native compiler), which is
-not a package dependency: install it once (`npm i -g @typescript/native-preview`)
-or substitute `npx tsc -p tsconfig.json` locally (the `typescript` devDependency
-provides `tsc`; `tsgo` is the source of truth that CI runs).
+The `typecheck` scripts run `tsc`, the TypeScript 7 native compiler. It comes
+from the `@typescript/native` devDependency (an npm alias for `typescript@7`),
+which `npm ci` places at `node_modules/.bin/tsc` — no separate install step.
+(The `typescript` devDependency is aliased to `@typescript/typescript6`, the TS
+6.x API `typescript-eslint` needs; its bin is `tsc6`, so it never shadows the
+native `tsc`.)
 
 There is **no build step** — the package ships TypeScript source (`exports`
 points at `./src/index.ts`), so `npm run typecheck` is what stands in for a
