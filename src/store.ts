@@ -11,7 +11,7 @@
 //   interface MyMap { count: number; name: string }
 //   const { get, set, subscribe, effect, computed, batch } = createStore<MyMap>();
 
-import { signal, effect, batch, type Signal, type Cleanup } from "./signal.js";
+import { signal, effect, batch, untracked, type Signal, type Cleanup } from "./signal.js";
 
 /** A typed per-key reactive store with auto-tracked effects, computed, and batching. */
 export interface Store<M> {
@@ -19,6 +19,14 @@ export interface Store<M> {
   set<K extends keyof M & string>(key: K, value: M[K]): void;
   subscribe<K extends keyof M & string>(key: K, cb: (value: M[K]) => void): () => void;
   effect(fn: () => Cleanup): () => void;
+  /** Derive `outputKey` from other keys. NOT a lazy engine `computed`: this is
+   *  an EAGER effect that re-runs `fn` on dependency change and WRITES the
+   *  result to `outputKey`. Consequences of that shape: `fn` runs whether or
+   *  not anyone reads `outputKey`; a throwing `fn` is isolated by the effect
+   *  error handler (not cached and rethrown at the read site like an engine
+   *  computed); `set(outputKey, …)` still works between recomputes; and a
+   *  self-reading `fn` behaves as documented on the implementation below.
+   *  Returns the effect's dispose function. */
   computed<K extends keyof M & string>(outputKey: K, fn: () => M[K]): () => void;
   batch(fn: () => void): void;
 }
@@ -57,7 +65,11 @@ export function createStore<M>(): Store<M> {
         primed = true;
         return;
       }
-      cb(v);
+      // Untracked, mirroring the engine's `subscribe`: a callback that reads
+      // other keys must not become a dependency of this subscription.
+      untracked(() => {
+        cb(v);
+      });
     });
   }
 
