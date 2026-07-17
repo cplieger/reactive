@@ -449,3 +449,66 @@ describe("reconcileChildren: !canPatch on a positionally-displaced match (cycle-
     expect(parent.children[1]!.textContent).toBe("A2");
   });
 });
+
+describe("reconcileChildren: nodeKey precedence and duplicate keys", () => {
+  it("a specific *-id attribute wins over a preceding generic data-col", () => {
+    // Live pattern: a cell carrying BOTH keys (data-col="badges" +
+    // data-cov-id="<entity>") must key by entity id — a different entity's
+    // cell must not key-match it just because the column matches.
+    const parent = document.createElement("tr");
+    const cell = document.createElement("td");
+    cell.setAttribute("data-col", "badges");
+    cell.setAttribute("data-cov-id", "movie-1");
+    cell.textContent = "one";
+    parent.appendChild(cell);
+
+    const other = document.createElement("td");
+    other.setAttribute("data-col", "badges");
+    other.setAttribute("data-cov-id", "movie-2");
+    other.textContent = "two";
+    reconcileChildren(parent, [other]);
+
+    // Pre-fix both keyed as data-col=badges, so movie-2 patched onto
+    // movie-1's node. Now the entity id decides: no match, node replaced.
+    expect(parent.children.length).toBe(1);
+    expect(parent.children[0]).toBe(other);
+    expect(parent.children[0]!.getAttribute("data-cov-id")).toBe("movie-2");
+
+    // Same entity id across a re-patch → matched, identity preserved.
+    const update = document.createElement("td");
+    update.setAttribute("data-col", "badges");
+    update.setAttribute("data-cov-id", "movie-2");
+    update.textContent = "two!";
+    reconcileChildren(parent, [update]);
+    expect(parent.children[0]).toBe(other);
+    expect(other.textContent).toBe("two!");
+  });
+
+  it("duplicate-key siblings match in document order — identity preserved, no churn", () => {
+    // Live pattern: two data-col="meta" cells (year + language) in one row.
+    const parent = document.createElement("tr");
+    const year = document.createElement("td");
+    year.setAttribute("data-col", "meta");
+    year.textContent = "2001";
+    const lang = document.createElement("td");
+    lang.setAttribute("data-col", "meta");
+    lang.textContent = "English";
+    parent.append(year, lang);
+
+    const nYear = document.createElement("td");
+    nYear.setAttribute("data-col", "meta");
+    nYear.textContent = "2002";
+    const nLang = document.createElement("td");
+    nLang.setAttribute("data-col", "meta");
+    nLang.textContent = "French";
+    reconcileChildren(parent, [nYear, nLang]);
+
+    // Pre-fix the last-wins map paired the first new cell with the LAST old
+    // cell (year text patched onto the language node) and destroyed the other.
+    expect(parent.children.length).toBe(2);
+    expect(parent.children[0]).toBe(year);
+    expect(parent.children[1]).toBe(lang);
+    expect(year.textContent).toBe("2002");
+    expect(lang.textContent).toBe("French");
+  });
+});
