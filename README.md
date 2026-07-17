@@ -76,7 +76,7 @@ isComputed(doubled); // true
 - `flushSync()` — synchronously drain pending effects (no-op inside batch)
 - `untracked<T>(fn): T` — run fn without tracking signal reads (like Preact `untracked()` / Solid `untrack()`)
 - `on(deps, fn, options?): () => U` — explicit dependency declaration helper (like Solid `on()`). Returns `() => U`; with `{ defer: true }` the accessor returns `() => U | undefined` (the deferred first call yields `undefined`). A single accessor `() => T` types `value`/`prev` as `T`; an array of accessors types them as `unknown[]`. Pass into `effect()` or `computed()`.
-- `subscribe(signal, cb): () => void` — subscribe to a signal, calling cb immediately and on every change
+- `subscribe(signal, cb): () => void` — subscribe to a signal, calling cb immediately and on every change. The callback runs untracked: signals read inside it do not become dependencies of the subscription
 - `isSignal(value): boolean` — type guard for signals created by `signal()`
 - `isComputed(value): boolean` — type guard for computed signals
 - `setEffectErrorHandler(handler): EffectErrorHandler` — set global error handler for effects; returns the previous handler
@@ -85,7 +85,7 @@ isComputed(doubled); // true
 
 - `el(tag, attrs?, ...children)` — CSP-safe element factory (the build half; `reconcile`/`patch` are the commit half). `className` → class; `on*` → handler property + `trackHandler` (so `patch` reconciles handlers); boolean DOM props (`hidden`/`disabled`/`checked`/`selected`/…) and `value`/`colSpan`/`rowSpan`/`tabIndex`/`htmlFor` → properties; everything else (`data-*`, `aria-*`, `style`, `id`) → `setAttribute`. String children become text nodes (never parsed as HTML); null/undefined attrs and children are skipped.
 - `reconcile<T>(parent, items, spec)` — keyed-list DOM reconciliation with mount/update/onRemove lifecycle
-- `patch(parent, ...children)` — structural tree-diff, replacing a parent's children with reconciled new nodes. Element nodes are keyed by their first `data-col` or `*-id` attribute (so reorders/re-patches reuse the matched node); unkeyed nodes match by position.
+- `patch(parent, ...children)` — structural tree-diff, replacing a parent's children with reconciled new nodes. Element nodes are keyed by a `*-id` attribute (specific entity id — takes precedence) or, failing that, `data-col` (so reorders/re-patches reuse the matched node); duplicate-key siblings match in document order; unkeyed nodes match by position.
 - `reconcileChildren(parent, newChildren)` — low-level child reconciliation against existing DOM
 - `trackHandler(el, key)` — register an `on*` property for handler reconciliation during tree-diff
 
@@ -93,7 +93,7 @@ isComputed(doubled); // true
 
 `createStore` and `SignalMap` are thin facades over the one signal engine — there is no second reactivity implementation. `createStore` lazily backs each key with a signal; `SignalMap` is a registry of signals keyed by a runtime string id.
 
-- `createStore<M>(): Store<M>` — typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe). A `computed` key whose fn reads its own output does not loop unbounded: a self-read that keeps yielding new values trips the engine's batch-iteration guard and surfaces `Error("Cycle detected")` through the effect error handler (effects isolate errors, so it is not rethrown to the caller), while a stable self-read settles via `Object.is` dedup.
+- `createStore<M>(): Store<M>` — typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe), and its callback runs untracked. `computed(outputKey, fn)` is an EAGER effect that writes `outputKey` on every dependency change — not a lazy engine computed — so `fn` runs whether or not anyone reads the key, a throwing `fn` routes to the effect error handler instead of being cached and rethrown at the read site, and `set(outputKey, …)` still works between recomputes. A `computed` key whose fn reads its own output does not loop unbounded: a self-read that keeps yielding new values trips the engine's batch-iteration guard and surfaces `Error("Cycle detected")` through the effect error handler (effects isolate errors, so it is not rethrown to the caller), while a stable self-read settles via `Object.is` dedup.
 - `SignalMap<V>` — dynamic per-id signal registry: `get(id)`, `ensure(id, initial)`, `clear(id)`, `clearAll()`. For reactive state whose key set isn't known at the type level (per-message streaming text, per-row state, …); complements `createStore`'s fixed key set.
 
 ### Collections
@@ -101,7 +101,7 @@ isComputed(doubled); // true
 A reactive ordered collection of keyed entities — the data half of the two-tier list pattern. A per-entity content update touches only that entity's subscribers; add/remove/reorder bumps the structure signal (`ids`). Built on `signal` + `SignalMap`.
 
 - `createCollection<T>(keyOf: (item: T) => string): Collection<T>` — returns a collection with:
-  - `setAll(items)` — replace everything (same-order replacement does not bump `ids`)
+  - `setAll(items)` — replace everything (same-order replacement does not bump `ids`; duplicate keys deduplicate — first occurrence keeps the position, last value wins)
   - `upsert(item)` — add/replace one (appends new ids); `prepend(items)` — add to the front (scroll-up/load-older pagination)
   - `update(id, next | updater)` / `remove(id)` / `clear()`
   - `get(id)` / `has(id)` (untracked), `signalFor(id)` (reactive per-entity), `size`
@@ -110,7 +110,7 @@ A reactive ordered collection of keyed entities — the data half of the two-tie
 
 ### List rendering
 
-- `bindList<T>(parent, source, spec): () => void` — two-tier render binding. `source` is a `ListSource<T>` = `{ ids, signalFor }`; a `Collection` satisfies it directly, and a filtered/sorted/paginated view is just `{ ids: computed(...), signalFor: collection.signalFor }` (pagination = a sliced view, not a separate primitive). One structural effect tracks `source.ids` and `reconcile`s the row list; each row owns a private effect tracking only its own entity signal, so a per-entity change repaints just that row with no structural reconcile. `spec`: `{ mount(item, id) => HTMLElement; update?(el, item, id); onRemove?(el, id) }` (`update` runs at mount and on every later change). Returns a dispose that tears down the structural effect and every row effect.
+- `bindList<T>(parent, source, spec): () => void` — two-tier render binding. `source` is a `ListSource<T>` = `{ ids, signalFor }`; a `Collection` satisfies it directly, and a filtered/sorted/paginated view is just `{ ids: computed(...), signalFor: collection.signalFor }` (pagination = a sliced view, not a separate primitive). One structural effect tracks `source.ids` and `reconcile`s the row list; each row owns a private effect tracking only its own entity signal, so a per-entity change repaints just that row with no structural reconcile. An id whose `signalFor` is `undefined` (an inconsistent source) is skipped rather than rendered. `spec`: `{ mount(item, id) => HTMLElement; update?(el, item, id); onRemove?(el, id) }` (`update` runs at mount and on every later change). Returns a dispose that tears down the structural effect and every row effect.
 
 ### Event bus
 
