@@ -150,3 +150,30 @@ describe("createCollection", () => {
     ]);
   });
 });
+
+describe("createCollection: setAll key deduplication", () => {
+  it("deduplicates repeated keys — first occurrence keeps the position, last value wins", () => {
+    expect.assertions(3);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+      { id: "a", n: 3 },
+    ]);
+    // Pre-fix, `ids` held ["a", "b", "a"] while one signal backed "a" — the
+    // structure and entity tiers disagreed.
+    expect([...c.ids.peek()]).toEqual(["a", "b"]);
+    expect(c.get("a")).toEqual({ id: "a", n: 3 });
+    expect(c.size).toBe(2);
+  });
+
+  it("items() never yields a duplicated entity after a duplicate-key setAll", () => {
+    expect.assertions(1);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([
+      { id: "a", n: 1 },
+      { id: "a", n: 2 },
+    ]);
+    expect(c.items()).toEqual([{ id: "a", n: 2 }]);
+  });
+});

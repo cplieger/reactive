@@ -19,7 +19,9 @@ import { effect, type ReadonlySignal } from "./signal.js";
 
 /** The minimal reactive surface `bindList` renders: a structure signal (the
  *  ordered ids) and a per-id content-signal lookup. `Collection<T>` satisfies
- *  this; so does `{ ids: computed(...), signalFor: collection.signalFor }`. */
+ *  this; so does `{ ids: computed(...), signalFor: collection.signalFor }`.
+ *  An id with no matching signal (an inconsistent source) is skipped — no row
+ *  is rendered for it until the source becomes consistent. */
 export interface ListSource<T> {
   readonly ids: ReadonlySignal<readonly string[]>;
   signalFor(id: string): ReadonlySignal<T> | undefined;
@@ -51,12 +53,23 @@ export function bindList<T>(
   const rowDisposers = new Map<string, () => void>();
 
   const disposeStructural = effect(() => {
-    const ids = source.ids.value; // structure tier: re-runs on add/remove/reorder only
+    // Structure tier: re-runs on add/remove/reorder only. An id whose entity
+    // signal is missing (an inconsistent ListSource) is skipped instead of
+    // mounting a row with a manufactured `undefined as T` value; it renders
+    // once the source becomes consistent (the next `ids` change).
+    const ids = source.ids.value.filter((id) => source.signalFor(id) !== undefined);
     reconcile<string>(parent, ids, {
       key: (id) => id,
       mount: (id) => {
         const sig = source.signalFor(id);
-        const el = spec.mount((sig === undefined ? undefined : sig.peek()) as T, id);
+        if (sig === undefined) {
+          // Unreachable via the structural filter above (same synchronous
+          // pass); reachable only by a source whose signalFor is not stable
+          // within one read — surface that loudly instead of manufacturing
+          // an entity value. Routed to the effect error handler.
+          throw new Error(`bindList: no entity signal for id "${id}"`);
+        }
+        const el = spec.mount(sig.peek(), id);
         if (spec.update !== undefined) {
           const update = spec.update;
           // content tier: isolated per-row effect; runs now (fills content)
