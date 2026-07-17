@@ -1,6 +1,8 @@
 // Structural tree-diff: reconcile a parent's children against new nodes.
 // Handles attribute patching, text node updates, element reordering,
-// and recursive child reconciliation. Keying via data-* or *-id attrs.
+// and recursive child reconciliation. Keying: a specific `*-id` attribute
+// wins over the generic `data-col`; duplicate-key siblings match in
+// document order.
 
 const handlerKeysMap = new WeakMap<HTMLElement, Set<string>>();
 
@@ -38,11 +40,19 @@ export function patch(
 /** Reconcile a parent node's children against a new set of child nodes, patching in place. */
 export function reconcileChildren(parent: Node, newChildren: Node[]): void {
   const oldChildren = Array.from(parent.childNodes);
-  const oldByKey = new Map<string, Node>();
+  // Per-key FIFO queues: siblings sharing a key (e.g. two `data-col="meta"`
+  // cells in one row) match in document order (first↔first, second↔second)
+  // instead of a last-wins map entry mispairing them and churning nodes.
+  const oldByKey = new Map<string, Node[]>();
   for (const child of oldChildren) {
     const key = nodeKey(child);
     if (key) {
-      oldByKey.set(key, child);
+      const queue = oldByKey.get(key);
+      if (queue === undefined) {
+        oldByKey.set(key, [child]);
+      } else {
+        queue.push(child);
+      }
     }
   }
 
@@ -54,10 +64,16 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
     }
     const newKey = nodeKey(newChild);
 
-    let matched = newKey ? (oldByKey.get(newKey) ?? null) : null;
-    if (matched) {
-      oldByKey.delete(newKey);
-    } else if (!newKey) {
+    let matched: Node | null = null;
+    if (newKey) {
+      const queue = oldByKey.get(newKey);
+      if (queue !== undefined) {
+        matched = queue.shift() ?? null;
+        if (queue.length === 0) {
+          oldByKey.delete(newKey);
+        }
+      }
+    } else {
       // Unkeyed new node: match the next UNKEYED old node by position, advancing
       // past keyed old nodes (which are reserved for key-based matching) and any
       // already-consumed slots. This mirrors the documented contract ("unkeyed
@@ -139,12 +155,20 @@ function nodeKey(node: Node): string {
   if (node.nodeType !== 1) {
     return "";
   }
+  // A specific entity id (`*-id`, e.g. data-cov-id / data-act-id) takes
+  // precedence over the generic column key (`data-col`), so an element
+  // carrying both keys by its entity identity — a generic first-in-attribute-
+  // order `data-col` must not shadow it.
+  let colKey = "";
   for (const attr of (node as Element).attributes) {
-    if (attr.name === "data-col" || attr.name.endsWith("-id")) {
+    if (attr.name.endsWith("-id")) {
       return `${attr.name}=${attr.value}`;
     }
+    if (colKey === "" && attr.name === "data-col") {
+      colKey = `${attr.name}=${attr.value}`;
+    }
   }
-  return "";
+  return colKey;
 }
 
 function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
