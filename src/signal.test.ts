@@ -618,6 +618,23 @@ describe("subscribe", () => {
     s.value = 5;
     expect(spy).toHaveBeenCalledWith(10);
   });
+
+  it("runs cb untracked: other signals read inside cb are not dependencies", () => {
+    // Upstream preactjs/signals#188 semantics, harvested by the 2026-07 drift
+    // audit: pre-fix, `other.value` read inside cb subscribed the effect to
+    // `other`, so writing `other` re-fired the subscription.
+    const s = signal(1);
+    const other = signal(10);
+    const seen: number[] = [];
+    subscribe(s, (v) => {
+      seen.push(v + other.value);
+    });
+    expect(seen).toEqual([11]);
+    other.value = 100; // must NOT re-fire the subscription
+    expect(seen).toEqual([11]);
+    s.value = 2; // still fires on the subscribed signal (reads fresh `other`)
+    expect(seen).toEqual([11, 102]);
+  });
 });
 
 describe("isSignal / isComputed", () => {

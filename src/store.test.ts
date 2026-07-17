@@ -41,6 +41,23 @@ describe("createStore", () => {
     expect(spy).toHaveBeenCalledTimes(1);
   });
 
+  it("subscribe cb is untracked: reading another key inside cb does not re-fire", () => {
+    // Mirrors the engine subscribe's untracked-callback contract (2026-07
+    // drift audit): pre-fix, `get("other")` inside cb made the subscription
+    // track `other`, so writing `other` re-fired a "v" subscription.
+    expect.assertions(2);
+    const { get, set, subscribe } = createStore<{ v: number; other: number }>();
+    set("other", 10);
+    const seen: number[] = [];
+    subscribe("v", (v) => {
+      seen.push(v + get("other"));
+    });
+    set("v", 1);
+    expect(seen).toEqual([11]);
+    set("other", 100); // must NOT re-fire the "v" subscription
+    expect(seen).toEqual([11]);
+  });
+
   it("batch coalesces", () => {
     expect.assertions(2);
     const store = createStore<{ a: number; b: number }>();

@@ -2,6 +2,19 @@
 // Preact-style doubly-linked source/target edges, pull-based glitch-free refresh,
 // global epoch + per-node version fast-skip, bitfield flags.
 // GPL-3.0-or-later.
+//
+// Port provenance: graph/scheduler semantics verified against
+// @preact/signals-core@1.14.4 (drift audit 2026-07-17). Deliberate deltas
+// from upstream, pinned by tests: Object.is equality incl. NaN (upstream:
+// `!==`); custom `equals` / `equals: false` options (upstream has none);
+// isolate-and-continue effect error policy via setEffectErrorHandler
+// (upstream disposes-and-rethrows); cycle guard in endBatch (upstream also
+// guards in the signal setter). Upstream machinery NOT ported by design:
+// watched/unwatched hooks, createModel/action (1.13+), and the 1.14.x
+// batch-snapshot A->B->A revert optimization — the version-monotonicity bug
+// its first release carried (preactjs/signals#947) never existed here.
+// Re-audit on upstream releases: diff src/index.ts against this file's
+// mechanisms and harvest engine-internal fixes (see CONTRIBUTING.md).
 
 const SIGNAL_BRAND = Symbol("signal");
 const COMPUTED_BRAND = Symbol("computed");
@@ -608,13 +621,19 @@ export function untracked<T>(fn: () => T): T {
   }
 }
 
-/** Subscribe to a signal, calling cb on every change. Returns dispose function. */
+/** Subscribe to a signal, calling cb on every change. Returns dispose function.
+ *  The callback runs untracked: reading other signals inside it does not add
+ *  them as dependencies of the subscription (matches upstream
+ *  preactjs/signals#188 semantics). */
 export function subscribe<T>(
   sig: Signal<T> | ReadonlySignal<T>,
   cb: (value: T) => void,
 ): () => void {
   return effect(() => {
-    cb(sig.value);
+    const value = sig.value;
+    untracked(() => {
+      cb(value);
+    });
     return undefined;
   });
 }
