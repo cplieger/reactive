@@ -12,7 +12,10 @@ import { SignalMap } from "./signal-map.js";
 /** A reactive, ordered, keyed collection of entities of type T. */
 export interface Collection<T> {
   /** Replace the whole collection (e.g. initial load). Entities no longer
-   *  present are dropped; the order becomes exactly `items`. */
+   *  present are dropped; the order becomes `items`, deduplicated by key
+   *  (first occurrence keeps the position, the last value wins — Map
+   *  semantics), so the order tier can never list an id twice while the
+   *  entity tier holds a single signal for it. */
   setAll(items: readonly T[]): void;
   /** Add a new entity or replace an existing one (keyed by `keyOf`). New
    *  entities are appended to the order. */
@@ -65,8 +68,13 @@ export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
       const seen = new Set<string>();
       for (const item of items) {
         const id = keyOf(item);
-        ids.push(id);
-        seen.add(id);
+        // Deduplicate repeated keys (first occurrence keeps the position, the
+        // last value wins) so the structure and entity tiers cannot disagree:
+        // one signal per id, one order entry per id.
+        if (!seen.has(id)) {
+          seen.add(id);
+          ids.push(id);
+        }
         sigs.ensure(id, item).value = item;
       }
       for (const id of order.peek()) {

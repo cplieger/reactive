@@ -163,22 +163,51 @@ describe("bindList", () => {
     dispose();
   });
 
-  it("mount tolerates a source whose signalFor returns undefined for a listed id", () => {
+  it("skips a listed id whose signalFor returns undefined — no row, no manufactured value", () => {
     const parent = document.createElement("div");
     const ids = signal<readonly string[]>(["ghost"]);
     const source = { ids, signalFor: (): undefined => undefined };
+    const mounted: unknown[] = [];
     const dispose = bindList(parent, source, {
-      mount: (_item, id) => {
+      mount: (item, id) => {
+        mounted.push(item);
         const el = document.createElement("div");
         el.setAttribute("data-row", id);
         return el;
       },
-      update: (el, _item, id) => {
-        el.setAttribute("data-updated", id);
-      },
     });
-    expect(parent.children[0]?.getAttribute("data-row")).toBe("ghost");
-    expect(parent.children[0]?.hasAttribute("data-updated")).toBe(false);
+    // Pre-fix, the ghost row mounted with `undefined as T`. The inconsistent
+    // id is now skipped entirely: mount never sees a manufactured value.
+    expect(parent.children.length).toBe(0);
+    expect(mounted).toEqual([]);
+    dispose();
+  });
+
+  it("renders consistent ids while skipping inconsistent ones, and recovers when the source becomes consistent", () => {
+    const parent = document.createElement("div");
+    const coll = createCollection<Row>(keyOf);
+    coll.setAll([{ id: "a", n: 1 }]);
+    const ids = signal<readonly string[]>(["a", "ghost"]);
+    const dispose = bindList(
+      parent,
+      { ids, signalFor: (id: string) => coll.signalFor(id) },
+      {
+        mount: (item, id) => {
+          const el = document.createElement("div");
+          el.setAttribute("data-row", id);
+          el.textContent = String(item.n);
+          return el;
+        },
+      },
+    );
+    expect(parent.children.length).toBe(1);
+    expect(parent.children[0]?.getAttribute("data-row")).toBe("a");
+    // Source becomes consistent (entity appears + ids bumps): the row renders.
+    coll.upsert({ id: "ghost", n: 2 });
+    ids.value = ["a", "ghost"];
+    expect(parent.children.length).toBe(2);
+    expect(parent.children[1]?.getAttribute("data-row")).toBe("ghost");
+    expect(parent.children[1]?.textContent).toBe("2");
     dispose();
   });
 });
