@@ -50,6 +50,28 @@ The README's ["Unsupported by Design" table](README.md#design-decisions--unsuppo
 is a **contract**, not a backlog: those deliberate non-goals are a design
 discussion before they are a PR.
 
+### Upstream drift audits
+
+`src/signal.ts` is a deliberate re-derivation of the `@preact/signals-core`
+graph/scheduler mechanism with documented semantic deltas (the header of
+`signal.ts` records the pinned baseline version, the deltas, and the upstream
+machinery intentionally not ported). The engine takes no dependency on
+upstream; instead, on new upstream releases, run a drift audit:
+
+1. Fetch the release source (`https://unpkg.com/@preact/signals-core@<ver>/src/index.ts`)
+   and its `CHANGELOG.md`.
+2. Triage changelog entries: engine-internal **fixes** (dependency graph,
+   scheduling, disposal, tracking) are harvest candidates; features that map
+   to the README's Unsupported-by-Design table (models, watchers, actions)
+   are not; fixes to machinery this port never adopted don't apply.
+3. Port applicable fixes with a regression test each, preserving this
+   library's deltas (`Object.is`, `equals` options, error isolation).
+4. Update the provenance baseline in the `signal.ts` header.
+
+Last audit: 2026-07-17 against 1.14.4 — harvested untracked `subscribe`
+callbacks (upstream #188); confirmed the 1.14.x batch-snapshot machinery and
+its #947 fix don't apply (never ported).
+
 ## Local development
 
 Requires Node and npm. Install dependencies, then run the checks:
