@@ -11,31 +11,31 @@ contributor needs; org-wide defaults are inherited from
 There is **one** reactivity engine, in `src/signal.ts`: Preact-style
 doubly-linked source/target edges, pull-based glitch-free refresh, a global
 epoch plus per-node version fast-skip, and bitfield flags. Everything else is a
-thin facade or a consumer of that engine — do not introduce a second
+thin facade or a consumer of that engine; do not introduce a second
 implementation.
 
-- `signal.ts` — the engine: `signal`, `computed`, `effect`, `batch`,
+- `signal.ts` is the engine: `signal`, `computed`, `effect`, `batch`,
   `flushSync`, `untracked`, `on`, `subscribe`, the `isSignal`/`isComputed`
   guards, and `setEffectErrorHandler`.
-- `store.ts` (`createStore`) and `signal-map.ts` (`SignalMap`) — facades over
+- `store.ts` (`createStore`) and `signal-map.ts` (`SignalMap`) are facades over
   the engine. `createStore` lazily backs each fixed key with a signal;
   `SignalMap` is a dynamic per-id signal registry. Because they sit on the one
   engine, they inherit glitch-freedom and cycle detection.
-- `collection.ts` (`createCollection`) — an ordered keyed collection built on
+- `collection.ts` (`createCollection`) is an ordered keyed collection built on
   `signal` + `SignalMap`. Two tiers: per-entity signals plus one structure
   signal (`ids`).
-- `bind-list.ts` (`bindList`) — the two-tier list-to-DOM binding. One
+- `bind-list.ts` (`bindList`) is the two-tier list-to-DOM binding. One
   structural effect tracks `source.ids` and reconciles the row list; each row
   owns an isolated effect tracking only its own entity signal.
-- `el.ts` (`el`) — CSP-safe element factory. String children become text nodes
-  (never parsed as HTML).
+- `el.ts` (`el`) is the CSP-safe element factory. String children become text
+  nodes (never parsed as HTML).
 - `reconcile.ts` (`reconcile`, `KEY_ATTR`) and `reconcile-tree.ts` (`patch`,
-  `reconcileChildren`, `trackHandler`) — keyed-list reconciliation and
+  `reconcileChildren`, `trackHandler`) handle keyed-list reconciliation and
   structural tree-diffing.
-- `bus.ts` (`createBus`) — the typed event primitive. State lives in signals;
+- `bus.ts` (`createBus`) is the typed event primitive. State lives in signals;
   discrete events go on the bus.
 
-The public API is whatever `src/index.ts` re-exports — that file is the
+The public API is whatever `src/index.ts` re-exports; that file is the
 contract. Update it deliberately, and keep the README API section in sync.
 
 ### Correctness invariants (protect these)
@@ -46,7 +46,7 @@ README. Don't regress these when touching `signal.ts`.
 
 ### Unsupported by design
 
-The README's ["Unsupported by Design" table](README.md#design-decisions--unsupported-by-design)
+The README's ["Unsupported by Design" table](README.md#unsupported-by-design)
 is a **contract**, not a backlog: those deliberate non-goals are a design
 discussion before they are a PR.
 
@@ -68,7 +68,7 @@ upstream; instead, on new upstream releases, run a drift audit:
    library's deltas (`Object.is`, `equals` options, error isolation).
 4. Update the provenance baseline in the `signal.ts` header.
 
-Last audit: 2026-07-17 against 1.14.4 — harvested untracked `subscribe`
+Last audit: 2026-07-17 against 1.14.4: harvested untracked `subscribe`
 callbacks (upstream #188); confirmed the 1.14.x batch-snapshot machinery and
 its #947 fix don't apply (never ported).
 
@@ -87,12 +87,12 @@ npx prettier --check .     # formatting (printWidth 100)
 
 The `typecheck` scripts run `tsc`, the TypeScript 7 native compiler. It comes
 from the `@typescript/native` devDependency (an npm alias for `typescript@7`),
-which `npm ci` places at `node_modules/.bin/tsc` — no separate install step.
+which `npm ci` places at `node_modules/.bin/tsc`; no separate install step.
 (The `typescript` devDependency is aliased to `@typescript/typescript6`, the TS
 6.x API `typescript-eslint` needs; its bin is `tsc6`, so it never shadows the
 native `tsc`.)
 
-There is **no build step** — the package ships TypeScript source (`exports`
+The package has **no build step**: it ships TypeScript source (`exports`
 points at `./src/index.ts`), so `npm run typecheck` is what stands in for a
 compile. CI runs the same battery centrally via
 [cplieger/ci](https://github.com/cplieger/ci); running the commands above
@@ -101,7 +101,7 @@ locally reproduces it.
 ### Conventions and gotchas
 
 - **ESM only.** Use `.js` extensions in relative imports (e.g.
-  `from "./signal.js"`) even though the files are `.ts` — that is how
+  `from "./signal.js"`) even though the files are `.ts`; that is how
   `index.ts` and the rest of `src/` are written, and it is required for the
   TS-source publish to resolve.
 - **Strict TypeScript.** `tsconfig.json` enables `exactOptionalPropertyTypes`,
@@ -131,7 +131,7 @@ is only a baseline; do not bump it by hand.
 ## Commits and PRs
 
 Branch from `main`, keep changes focused with tests, and open a PR. Commit
-messages follow [Conventional Commits](https://www.conventionalcommits.org/) —
+messages follow [Conventional Commits](https://www.conventionalcommits.org/);
 git-cliff parses them for the changelog and version bump, so write the subject
 as the changelog line you want (`feat: add prepend to collections`,
 `fix: dedup diamond updates in computed`).
@@ -141,5 +141,5 @@ as the changelog line you want (`feat: add prepend to collections`,
 By participating you agree to the
 [Code of Conduct](https://github.com/cplieger/.github/blob/main/CODE_OF_CONDUCT.md).
 Report security issues through the
-[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md) —
+[security policy](https://github.com/cplieger/.github/blob/main/SECURITY.md),
 never in a public issue.
