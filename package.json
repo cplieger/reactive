@@ -26,6 +26,9 @@
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.10"
   },
+  "overrides": {
+    "qs": "^6.15.2"
+  },
   "description": "Signals + DOM-reconciliation reactive core for TypeScript (zero dependencies)",
   "license": "GPL-3.0-or-later",
   "types": "./src/index.ts",
