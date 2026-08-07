@@ -39,6 +39,23 @@
     "type": "git",
     "url": "git+https://github.com/cplieger/reactive.git"
   },
+  "homepage": "https://github.com/cplieger/reactive",
+  "bugs": {
+    "url": "https://github.com/cplieger/reactive/issues"
+  },
+  "author": "cplieger <917744+cplieger@users.noreply.github.com>",
+  "keywords": [
+    "signals",
+    "reactivity",
+    "computed",
+    "effect",
+    "dom",
+    "reconciliation",
+    "store",
+    "event-bus",
+    "zero-dependency",
+    "typescript"
+  ],
   "files": [
     "src/",
     "!src/**/*.test.ts",
