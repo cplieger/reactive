@@ -30,7 +30,7 @@
     "qs": "^6.15.2"
   },
   "description": "Signals + DOM-reconciliation reactive core for TypeScript (zero dependencies)",
-  "license": "GPL-3.0-or-later",
+  "license": "Apache-2.0",
   "types": "./src/index.ts",
   "publishConfig": {
     "access": "public"
