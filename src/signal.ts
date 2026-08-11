@@ -1,7 +1,7 @@
 // Reactive signals: signal<T>, effect (with cleanup), batch, computed, untracked.
 // Preact-style doubly-linked source/target edges, pull-based glitch-free refresh,
 // global epoch + per-node version fast-skip, bitfield flags.
-// GPL-3.0-or-later.
+// Apache-2.0.
 //
 // Port provenance: graph/scheduler semantics verified against
 // @preact/signals-core@1.14.4 (drift audit 2026-07-17). Deliberate deltas
