@@ -177,3 +177,75 @@ describe("createCollection: setAll key deduplication", () => {
     expect(c.items()).toEqual([{ id: "a", n: 2 }]);
   });
 });
+
+describe("createCollection: entity-tier cleanup", () => {
+  it("setAll drops the entity signals of ids no longer present", () => {
+    expect.assertions(4);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+    ]);
+    c.setAll([{ id: "b", n: 20 }]);
+    // "a" left the collection, so the entity tier must forget it too — a
+    // surviving signal would keep a removed row readable and reactive.
+    expect(c.has("a")).toBe(false);
+    expect(c.get("a")).toBeUndefined();
+    expect(c.signalFor("a")).toBeUndefined();
+    expect(c.get("b")).toEqual({ id: "b", n: 20 });
+  });
+
+  it("clear drops the per-entity signals, not just the order", () => {
+    expect.assertions(3);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+    ]);
+    c.clear();
+    expect(c.has("a")).toBe(false);
+    expect(c.get("b")).toBeUndefined();
+    expect(c.signalFor("a")).toBeUndefined();
+  });
+
+  it("prepend creates the entity signal for a new id", () => {
+    expect.assertions(3);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([{ id: "b", n: 2 }]);
+    c.prepend([{ id: "a", n: 1 }]);
+    // The order tier lists "a"; the entity tier must actually back it, or the
+    // id renders as a row with no value.
+    expect(c.get("a")).toEqual({ id: "a", n: 1 });
+    expect(c.signalFor("a")?.peek()).toEqual({ id: "a", n: 1 });
+    expect(c.items()).toEqual([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+    ]);
+  });
+});
+
+describe("createCollection: structure-tier equality", () => {
+  it("the ids signal fires when a later id changes and the length does not", () => {
+    expect.assertions(2);
+    const c = createCollection<Row>(keyOf);
+    c.setAll([
+      { id: "a", n: 1 },
+      { id: "b", n: 2 },
+    ]);
+    const seen: string[][] = [];
+    effect(() => {
+      seen.push([...c.ids.value]);
+    });
+    // Same length and same first id: the shallow compare has to look at EVERY
+    // position, not just find one match, or a swapped-out row never repaints.
+    c.setAll([
+      { id: "a", n: 1 },
+      { id: "c", n: 3 },
+    ]);
+    expect(seen).toEqual([
+      ["a", "b"],
+      ["a", "c"],
+    ]);
+    expect([...c.ids.peek()]).toEqual(["a", "c"]);
+  });
+});

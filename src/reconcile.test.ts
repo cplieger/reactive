@@ -918,3 +918,34 @@ describe("reconcile: in-place move guard (focus preservation)", () => {
     parent.remove();
   });
 });
+
+describe("reconcile: non-element children in the parent", () => {
+  it("ignores text and comment nodes while reusing the keyed elements around them", () => {
+    expect.assertions(4);
+    const parent = document.createElement("ul");
+    // The shape a server-rendered container arrives in: indentation text nodes
+    // and a comment marker between the real rows.
+    parent.appendChild(document.createTextNode("\n  "));
+    parent.appendChild(document.createComment("rows"));
+    const rowA = document.createElement("li");
+    rowA.setAttribute(KEY_ATTR, "a");
+    parent.appendChild(rowA);
+
+    const spec: ReconcileSpec<string> = {
+      key: (id) => id,
+      mount: (id) => {
+        const li = document.createElement("li");
+        li.textContent = id;
+        return li;
+      },
+    };
+    reconcile(parent, ["a", "b"], spec);
+
+    // Only elements carry keys; asking a text node for its attributes would
+    // throw, so the scan has to skip them.
+    expect(parent.children.length).toBe(2);
+    expect(parent.children[0]).toBe(rowA);
+    expect(parent.children[1]!.getAttribute(KEY_ATTR)).toBe("b");
+    expect(parent.childNodes[0]!.nodeType).toBe(3);
+  });
+});
