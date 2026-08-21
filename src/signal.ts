@@ -354,6 +354,17 @@ function endBatch(): void {
     batchIteration++;
     if (batchIteration > MAX_BATCH_ITERATIONS) {
       batchIteration = 0;
+      // Un-notify the chain we are dropping: notifyTargets skips a NOTIFIED
+      // effect, so an effect left NOTIFIED here could never be queued again —
+      // bailing would silently deafen every effect in flight, including
+      // bystanders that merely share a signal with the cycling one.
+      let drop: EffectNode | undefined = eff;
+      while (drop !== undefined) {
+        const nextDrop: EffectNode | undefined = drop._nextBatchedEffect;
+        drop._nextBatchedEffect = undefined;
+        drop._flags &= ~NOTIFIED;
+        drop = nextDrop;
+      }
       throw new Error("Cycle detected");
     }
     while (eff !== undefined) {
