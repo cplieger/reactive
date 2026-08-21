@@ -512,3 +512,148 @@ describe("reconcileChildren: nodeKey precedence and duplicate keys", () => {
     expect(lang.textContent).toBe("French");
   });
 });
+
+describe("trackHandler: one element, several handler keys", () => {
+  it("clears every tracked handler on a reused node, not just the last one registered", () => {
+    expect.assertions(2);
+    const parent = document.createElement("div");
+    const oldEl = document.createElement("button");
+    (oldEl as unknown as Record<string, unknown>)["onclick"] = vi.fn();
+    (oldEl as unknown as Record<string, unknown>)["onmouseover"] = vi.fn();
+    trackHandler(oldEl, "onclick");
+    trackHandler(oldEl, "onmouseover");
+    parent.appendChild(oldEl);
+
+    // The replacement carries no handlers, so BOTH tracked keys must be nulled.
+    // A trackHandler that started a fresh key set on every call would remember
+    // only "onmouseover" and leave the click handler live on the reused node.
+    patch(parent, document.createElement("button"));
+
+    const reused = parent.children[0] as unknown as Record<string, unknown>;
+    expect(reused["onclick"]).toBeNull();
+    expect(reused["onmouseover"]).toBeNull();
+  });
+});
+
+describe("patchAttrs: handler tracking across successive patches", () => {
+  it("re-tracks the handlers it copied onto the reused node, so a later patch can clear them", () => {
+    expect.assertions(2);
+    const parent = document.createElement("div");
+    const reused = document.createElement("button"); // starts with no handlers
+    parent.appendChild(reused);
+
+    const withHandler = document.createElement("button");
+    const handler = vi.fn();
+    (withHandler as unknown as Record<string, unknown>)["onclick"] = handler;
+    trackHandler(withHandler, "onclick");
+    patch(parent, withHandler);
+    expect((reused as unknown as Record<string, unknown>)["onclick"]).toBe(handler);
+
+    // Second patch, no handlers: the node adopted "onclick" in the first patch,
+    // so the reconciler must have recorded it against the REUSED node — an
+    // adopted handler that is not re-tracked can never be cleared again.
+    patch(parent, document.createElement("button"));
+    expect((reused as unknown as Record<string, unknown>)["onclick"]).toBeNull();
+  });
+});
+
+describe("patchAttrs: attributes the replacement no longer carries", () => {
+  it("removes stale attributes from a reused node", () => {
+    expect.assertions(4);
+    const parent = document.createElement("div");
+    const oldEl = document.createElement("span");
+    oldEl.setAttribute("data-col", "k");
+    oldEl.setAttribute("title", "stale");
+    oldEl.setAttribute("aria-busy", "true");
+    parent.appendChild(oldEl);
+
+    const next = document.createElement("span");
+    next.setAttribute("data-col", "k");
+    reconcileChildren(parent, [next]);
+
+    expect(parent.children[0]).toBe(oldEl); // reused by key
+    expect(oldEl.getAttribute("data-col")).toBe("k");
+    expect(oldEl.hasAttribute("title")).toBe(false);
+    expect(oldEl.hasAttribute("aria-busy")).toBe(false);
+  });
+});
+
+describe("canPatch: which node types patch in place", () => {
+  it("patches a text node in place instead of replacing it", () => {
+    expect.assertions(2);
+    const parent = document.createElement("div");
+    const textNode = document.createTextNode("old");
+    parent.appendChild(textNode);
+
+    reconcileChildren(parent, [document.createTextNode("new")]);
+
+    // Same node object, new data: a text node is always patchable, so the
+    // reconciler must never swap it for the incoming one.
+    expect(parent.childNodes[0]).toBe(textNode);
+    expect(textNode.textContent).toBe("new");
+  });
+
+  it("replaces a comment node, since only text and element nodes patch in place", () => {
+    expect.assertions(2);
+    const parent = document.createElement("div");
+    const oldComment = document.createComment("old");
+    parent.appendChild(oldComment);
+
+    patch(parent, document.createComment("new"));
+
+    // Nothing patches a comment's data, so treating it as patchable would leave
+    // the stale text in the DOM forever.
+    expect(parent.childNodes.length).toBe(1);
+    expect((parent.firstChild as Comment | null)?.data).toBe("new");
+  });
+});
+
+describe("nodeKey: which attributes act as a key", () => {
+  function cell(col: string, text: string): HTMLTableCellElement {
+    const td = document.createElement("td");
+    td.setAttribute("data-col", col);
+    td.textContent = text;
+    return td;
+  }
+  function classedDiv(cls: string, text: string): HTMLDivElement {
+    const d = document.createElement("div");
+    d.setAttribute("class", cls);
+    d.textContent = text;
+    return d;
+  }
+
+  it("a data-col key follows its node through a reorder", () => {
+    expect.assertions(4);
+    const parent = document.createElement("tr");
+    const title = cell("title", "T");
+    const actions = cell("actions", "A");
+    parent.append(title, actions);
+
+    reconcileChildren(parent, [cell("actions", "A2"), cell("title", "T2")]);
+
+    // Identity travels with the key, so the actions cell moves to the front
+    // instead of the title cell being overwritten with the actions content.
+    expect(parent.children[0]).toBe(actions);
+    expect(parent.children[0]!.textContent).toBe("A2");
+    expect(parent.children[1]).toBe(title);
+    expect(parent.children[1]!.textContent).toBe("T2");
+  });
+
+  it("an attribute that is neither `*-id` nor `data-col` is not a key: such nodes match by position", () => {
+    expect.assertions(4);
+    const parent = document.createElement("div");
+    const first = classedDiv("alpha", "A");
+    const second = classedDiv("beta", "B");
+    parent.append(first, second);
+
+    // The two swap content. `class` is not a key, so each node keeps its slot
+    // and takes the incoming content; keying off an arbitrary attribute would
+    // swap the nodes themselves.
+    reconcileChildren(parent, [classedDiv("beta", "B"), classedDiv("alpha", "A")]);
+
+    expect(parent.children[0]).toBe(first);
+    expect(parent.children[0]!.getAttribute("class")).toBe("beta");
+    expect(parent.children[1]).toBe(second);
+    expect(parent.children[1]!.getAttribute("class")).toBe("alpha");
+  });
+});

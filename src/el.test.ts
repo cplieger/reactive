@@ -79,3 +79,34 @@ describe("el", () => {
     expect(td.colSpan).toBe(3);
   });
 });
+
+describe("el: handler keys vs attributes that merely contain `on`", () => {
+  it("keeps `aria-controls` an attribute — only a key STARTING with `on` is a handler", () => {
+    expect.assertions(2);
+    const btn = el("button", { "aria-controls": "panel-1" });
+    expect(btn.getAttribute("aria-controls")).toBe("panel-1");
+    // An unanchored test would match the "on" inside "aria-cONtrols" and assign
+    // it as a property, so the attribute would never reach the DOM.
+    expect((btn as unknown as Record<string, unknown>)["aria-controls"]).toBeUndefined();
+  });
+});
+
+describe("el: property-set keys are not attributes", () => {
+  it("a false boolean prop leaves no attribute behind", () => {
+    expect.assertions(2);
+    const btn = el("button", { disabled: false }) as HTMLButtonElement;
+    // setAttribute("disabled", "false") would make the button disabled: for a
+    // boolean attribute, presence is the value.
+    expect(btn.disabled).toBe(false);
+    expect(btn.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("htmlFor is assigned as a property, so it reflects to the `for` attribute", () => {
+    expect.assertions(2);
+    const label = el("label", { htmlFor: "field-1" }) as HTMLLabelElement;
+    // setAttribute("htmlFor", …) would land on a "htmlfor" attribute that no
+    // label API reads.
+    expect(label.htmlFor).toBe("field-1");
+    expect(label.getAttribute("for")).toBe("field-1");
+  });
+});

@@ -102,3 +102,40 @@ describe("createBus", () => {
     expect(onError).toHaveBeenCalledWith("num", expect.any(Error));
   });
 });
+
+describe("createBus: clear with no event", () => {
+  it("removes the handlers of every event, not just one", () => {
+    expect.assertions(2);
+    const bus = createBus<Events>();
+    const ping = vi.fn<() => void>();
+    const num = vi.fn<(n: number) => void>();
+    bus.on("ping", ping);
+    bus.on("num", num);
+
+    bus.clear();
+
+    bus.emit("ping");
+    bus.emit("num", 1);
+    expect(ping).not.toHaveBeenCalled();
+    expect(num).not.toHaveBeenCalled();
+  });
+});
+
+describe("createBus: the built-in onError", () => {
+  it("reports a throwing handler to console.error when no onError was supplied", () => {
+    expect.assertions(2);
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      const bus = createBus<Events>(); // no onError → the built-in default
+      bus.on("num", () => {
+        throw new Error("boom");
+      });
+      bus.emit("num", 1);
+      // Without this the default swallows handler errors silently.
+      expect(logged).toHaveBeenCalledTimes(1);
+      expect(logged).toHaveBeenCalledWith('[bus] handler error for "num":', expect.any(Error));
+    } finally {
+      logged.mockRestore();
+    }
+  });
+});

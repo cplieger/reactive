@@ -211,3 +211,21 @@ describe("bindList", () => {
     dispose();
   });
 });
+
+describe("bindList: dispose stops the structural tier", () => {
+  it("later adds and removes no longer touch the DOM", () => {
+    expect.assertions(3);
+    const { parent, coll, counts, dispose } = setup();
+    coll.setAll([{ id: "a", n: 1 }]);
+
+    dispose();
+
+    // The structural effect tracks `ids`, so an add after dispose would mount a
+    // row into a parent the caller has already torn down.
+    coll.upsert({ id: "b", n: 2 });
+    expect(parent.children.length).toBe(1);
+    expect(counts.mount).toBe(1);
+    coll.remove("a");
+    expect(parent.children.length).toBe(1);
+  });
+});
