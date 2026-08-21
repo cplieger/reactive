@@ -97,7 +97,7 @@ isComputed(doubled); // true
 
 - `el(tag, attrs?, ...children)`: CSP-safe element factory (the build half; `reconcile`/`patch` are the commit half). `className` → class; `on*` → handler property + `trackHandler` (so `patch` reconciles handlers); boolean DOM props (`hidden`/`disabled`/`checked`/`selected`/…) and `value`/`colSpan`/`rowSpan`/`tabIndex`/`htmlFor` → properties; everything else (`data-*`, `aria-*`, `style`, `id`) → `setAttribute`. String children become text nodes (never parsed as HTML); null/undefined attrs and children are skipped.
 - `reconcile<T>(parent, items, spec)`: keyed-list DOM reconciliation with mount/update/onRemove lifecycle
-- `patch(parent, ...children)`: structural tree-diff, replacing a parent's children with reconciled new nodes. Element nodes are keyed by a `*-id` attribute (a specific entity id, which takes precedence) or, failing that, `data-col`, so reorders and re-patches reuse the matched node; duplicate-key siblings match in document order; unkeyed nodes match by position.
+- `patch(parent, ...children)`: structural tree-diff, replacing a parent's children with reconciled new nodes. Element nodes are keyed by a `*-id` attribute (a specific entity id, which takes precedence) or, failing that, `data-col`, so reorders and re-patches reuse the matched node; duplicate-key siblings match in document order; unkeyed nodes match by position. A reused element takes the new node's attributes, its tracked `on*` handlers, and the two unreflected boolean properties `checked` and `selected`; the live `value` of a text-entry control (`input`/`textarea`/`select`) is left as the user left it, because overwriting it would destroy in-progress typing and the caret (see [Unsupported by Design](#unsupported-by-design)).
 - `reconcileChildren(parent, newChildren)`: low-level child reconciliation against existing DOM
 - `trackHandler(el, key)`: register an `on*` property for handler reconciliation during tree-diff
 
@@ -142,18 +142,19 @@ State lives in signals; discrete events go on a bus. `createBus` is the typed ev
 
 The following features are intentionally NOT implemented:
 
-| Feature                                       | Reason                                                                                                             |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| **Effect ownership tree / `createRoot`**      | Consumers manage disposal explicitly. Adding ownership changes the mental model.                                   |
-| **Nested effect auto-disposal**               | Each effect is independent and returns its own dispose function. Compose with arrays or helper functions.          |
-| **Lazy activation / `onMount` lifecycle**     | Signals are always active. Resource management is the consumer's responsibility.                                   |
-| **`Signal.subtle.Watcher` / notify-on-dirty** | This library IS the framework layer. The Watcher pattern is for frameworks that sit on top of a signals primitive. |
-| **Introspection APIs**                        | Dev-tools concern. Not needed for production.                                                                      |
-| **Explicit computed disposal**                | Computed signals are GC'd when unreferenced. No explicit teardown needed.                                          |
-| **SSR / server-side isolation**               | Client-side library. Server usage should instantiate fresh signal graphs per request.                              |
-| **Async signals / resources**                 | Out of scope. Use effects + manual signal writes for async data loading.                                           |
-| **Transactions**                              | Framework-level concern. Not a signals primitive.                                                                  |
-| **Custom scheduler / `setScheduler()`**       | Batch is synchronous. No scheduler needed.                                                                         |
+| Feature                                       | Reason                                                                                                              |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| **Effect ownership tree / `createRoot`**      | Consumers manage disposal explicitly. Adding ownership changes the mental model.                                    |
+| **Nested effect auto-disposal**               | Each effect is independent and returns its own dispose function. Compose with arrays or helper functions.           |
+| **Lazy activation / `onMount` lifecycle**     | Signals are always active. Resource management is the consumer's responsibility.                                    |
+| **`Signal.subtle.Watcher` / notify-on-dirty** | This library IS the framework layer. The Watcher pattern is for frameworks that sit on top of a signals primitive.  |
+| **Introspection APIs**                        | Dev-tools concern. Not needed for production.                                                                       |
+| **Explicit computed disposal**                | Computed signals are GC'd when unreferenced. No explicit teardown needed.                                           |
+| **SSR / server-side isolation**               | Client-side library. Server usage should instantiate fresh signal graphs per request.                               |
+| **Async signals / resources**                 | Out of scope. Use effects + manual signal writes for async data loading.                                            |
+| **Transactions**                              | Framework-level concern. Not a signals primitive.                                                                   |
+| **Custom scheduler / `setScheduler()`**       | Batch is synchronous. No scheduler needed.                                                                          |
+| **Controlled form inputs**                    | `patch()` reconciles the tree, not form state. It syncs `checked`/`selected`; a live `value` needs your own effect. |
 
 ## Contributing
 

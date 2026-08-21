@@ -186,6 +186,37 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
     oldEl.hidden = newEl.hidden;
   }
 
+  // Unreflected live state. `checked` (input) and `selected` (option) are
+  // dirty-flag IDL properties: their content attributes are the DEFAULTS
+  // (`defaultChecked` / `defaultSelected`), so the two loops above equalise the
+  // default and never the live value — without this, a keyed re-patch could not
+  // turn a checkbox off or move a selection, ever. Both are discrete booleans
+  // with no partial state, so the render output owns them.
+  //
+  // The live `value` of an input/textarea/select is deliberately NOT synced —
+  // see the README's Unsupported-by-Design table. Overwriting it would destroy
+  // in-progress typing and the caret, which needs the state ownership and
+  // change routing of a controlled-input contract that patch() does not have.
+  // `value` on an <option>/<progress>/<li> DOES reflect, so the loops above
+  // already carry it. `indeterminate` is unreflected too, but el() cannot set
+  // it, so it is outside patch()'s reach.
+  //
+  // canPatch has already established that both nodes share a nodeName, so one
+  // side decides the branch.
+  if (oldEl.nodeName === "INPUT") {
+    const oldInput = oldEl as HTMLInputElement;
+    const newInput = newEl as HTMLInputElement;
+    if (oldInput.checked !== newInput.checked) {
+      oldInput.checked = newInput.checked;
+    }
+  } else if (oldEl.nodeName === "OPTION") {
+    const oldOption = oldEl as HTMLOptionElement;
+    const newOption = newEl as HTMLOptionElement;
+    if (oldOption.selected !== newOption.selected) {
+      oldOption.selected = newOption.selected;
+    }
+  }
+
   // Reconcile on* event handler properties (not reflected as attributes).
   const newKeys = handlerKeysMap.get(newEl);
   const oldKeys = handlerKeysMap.get(oldEl);

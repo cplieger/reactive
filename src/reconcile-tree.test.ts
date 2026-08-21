@@ -1,6 +1,6 @@
 // Structural tree-diff: patch / reconcileChildren / trackHandler.
 import { describe, it, expect, vi } from "vitest";
-import { patch, reconcileChildren, trackHandler } from "./index.js";
+import { el, patch, reconcileChildren, trackHandler } from "./index.js";
 
 describe("patch", () => {
   it("patches text content", () => {
@@ -668,5 +668,64 @@ describe("patch: string children are never parsed as markup", () => {
     expect(parent.children.length).toBe(0);
     expect(parent.childNodes.length).toBe(1);
     expect(parent.textContent).toBe("<b>bold</b>");
+  });
+});
+
+describe("patchAttrs: unreflected DOM properties", () => {
+  it("turns a reused checkbox off on re-patch", () => {
+    expect.assertions(3);
+    const parent = document.createElement("div");
+    patch(parent, el("input", { type: "checkbox", "data-col": "keep", checked: true }));
+    const box = parent.children[0] as HTMLInputElement;
+    expect(box.checked).toBe(true);
+
+    patch(parent, el("input", { type: "checkbox", "data-col": "keep", checked: false }));
+
+    // `checked` never reflects to an attribute, so the attribute loops cannot
+    // see it: without an explicit sync the reused box stays ticked forever.
+    expect(parent.children[0]).toBe(box);
+    expect(box.checked).toBe(false);
+  });
+
+  it("moves a reused option's selection on re-patch", () => {
+    expect.assertions(4);
+    const parent = document.createElement("select");
+    patch(
+      parent,
+      el("option", { "data-col": "a", value: "a", selected: true }, "A"),
+      el("option", { "data-col": "b", value: "b", selected: false }, "B"),
+    );
+    const first = parent.children[0] as HTMLOptionElement;
+    const second = parent.children[1] as HTMLOptionElement;
+
+    patch(
+      parent,
+      el("option", { "data-col": "a", value: "a", selected: false }, "A"),
+      el("option", { "data-col": "b", value: "b", selected: true }, "B"),
+    );
+
+    // Same nodes (keyed by data-col), selection moved: `selected` reflects to
+    // `defaultSelected`, not to the live property the loops above equalise.
+    expect(parent.children[0]).toBe(first);
+    expect(parent.children[1]).toBe(second);
+    expect(first.selected).toBe(false);
+    expect(second.selected).toBe(true);
+  });
+
+  it("leaves a reused text input's value alone (unsupported by design)", () => {
+    expect.assertions(3);
+    const parent = document.createElement("div");
+    patch(parent, el("input", { type: "text", "data-col": "keep", value: "rendered" }));
+    const input = parent.children[0] as HTMLInputElement;
+    input.value = "what the user typed";
+
+    patch(parent, el("input", { type: "text", "data-col": "keep", value: "rendered again" }));
+
+    // patch() reconciles the tree, not form state: syncing a live `value` would
+    // destroy in-progress typing and the caret, which needs a controlled-input
+    // contract this library does not offer (README: Unsupported by Design).
+    expect(parent.children[0]).toBe(input);
+    expect(input.value).toBe("what the user typed");
+    expect(input.getAttribute("value")).toBe(null);
   });
 });
