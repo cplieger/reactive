@@ -225,7 +225,22 @@ function notifyTargets(source: SourceNode): void {
     const target = node._target;
     if (target._isComputed) {
       // It's a ComputedNode
-      if (!(target._flags & (NOTIFIED | RUNNING))) {
+      if (target._flags & RUNNING) {
+        // A source written while this computed is mid-evaluation. Mark it stale
+        // so the next read re-runs it — every refresh call site pre-checks
+        // DIRTY, so without this the computed serves its pre-write value
+        // forever — but do NOT recurse: its own version has not moved yet, and
+        // recursing out of a RUNNING node is how a notify ping-pong is built.
+        //
+        // This repairs the PULL side only, deliberately. Two limits the next
+        // reader should not have to rediscover: (1) the computed's own
+        // subscribers are not woken here, so an effect that depends on it will
+        // not re-run until something else notifies it; (2) a computed that
+        // writes its own source unconditionally costs one extra recompute per
+        // read, and inside an effect it degrades into the documented
+        // MAX_BATCH_ITERATIONS "Cycle detected" path rather than hanging.
+        target._flags |= DIRTY;
+      } else if (!(target._flags & NOTIFIED)) {
         target._flags |= DIRTY | NOTIFIED;
         notifyTargets(target as unknown as SourceNode);
         target._flags &= ~NOTIFIED;
