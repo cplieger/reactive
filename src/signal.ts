@@ -1,6 +1,6 @@
 // Reactive signals: signal<T>, effect (with cleanup), batch, computed, untracked.
 // Preact-style doubly-linked source/target edges, pull-based glitch-free refresh,
-// global epoch + per-node version fast-skip, bitfield flags.
+// per-node version fast-skip, bitfield flags.
 // Apache-2.0.
 //
 // Port provenance: graph/scheduler semantics verified against
@@ -8,11 +8,31 @@
 // from upstream, pinned by tests: Object.is equality incl. NaN (upstream:
 // `!==`); custom `equals` / `equals: false` options (upstream has none);
 // isolate-and-continue effect error policy via setEffectErrorHandler
-// (upstream disposes-and-rethrows); cycle guard in endBatch (upstream also
-// guards in the signal setter). Upstream machinery NOT ported by design:
-// watched/unwatched hooks, createModel/action (1.13+), and the 1.14.x
-// batch-snapshot A->B->A revert optimization — the version-monotonicity bug
-// its first release carried (preactjs/signals#947) never existed here.
+// (upstream disposes-and-rethrows); the cycle guard lives in endBatch's drain
+// and un-notifies the chain it drops (upstream guards ONLY in the signal
+// setter, evaluated before the write, so it never drops a chain); and the drain
+// is re-entrant — `if (--batchDepth > 0) return` lets a write from an effect
+// body start a fresh drain, where upstream's `if (batchDepth > 1) return` plus
+// a post-drain `batchDepth--` keeps one drain per outermost batch.
+//
+// Upstream machinery NOT ported by design:
+//   - watched/unwatched hooks, createModel/action (1.13+);
+//   - the 1.14.x batch-snapshot A->B->A revert optimization — the
+//     version-monotonicity bug its first release carried
+//     (preactjs/signals#947) never existed here;
+//   - the `globalVersion` epoch fast-skip in refreshComputed. All three
+//     refresh call sites pre-check DIRTY, and because this port never
+//     unsubscribes a computed from its sources, notifyTargets always reaches
+//     every dependent computed — so DIRTY is a complete staleness signal.
+//     Upstream needs the epoch for computeds with no subscribers, which have
+//     no live edges. Do NOT try to revive it by deleting the DIRTY pre-checks:
+//     this refreshComputed has neither upstream's TRACKING shortcut nor its
+//     internal needsToRecompute gate, so an epoch miss recomputes
+//     unconditionally and six recompute-gating tests go red.
+//   - upstream's endBatch error capture and rethrow. Effect errors are
+//     isolated inside runEffect (see its contract below), so nothing can throw
+//     out of the drain and there was never anything to capture.
+//
 // Re-audit on upstream releases: diff src/index.ts against this file's
 // mechanisms and harvest engine-internal fixes (see CONTRIBUTING.md).
 
@@ -59,7 +79,6 @@ interface ComputedNode extends SourceNode, TargetNode {
   _isComputed: true;
   _fn: () => unknown;
   _equals: ((a: unknown, b: unknown) => boolean) | undefined;
-  _globalVersion: number;
 }
 
 interface EffectNode {
@@ -76,7 +95,6 @@ let evalContext: TargetNode | undefined;
 let batchDepth = 0;
 let batchedEffect: EffectNode | undefined;
 let batchIteration = 0;
-let globalVersion = 0;
 
 // Max effect-scheduling passes within one endBatch before assuming a cyclic
 // effect-write loop and bailing with "Cycle detected".
@@ -286,12 +304,6 @@ function refreshComputed(comp: ComputedNode): void {
     throw new Error("Cycle detected");
   }
 
-  // Fast-path: nothing changed globally since last check
-  if (comp._globalVersion === globalVersion && !(comp._flags & DIRTY)) {
-    return;
-  }
-  comp._globalVersion = globalVersion;
-
   const prevContext = evalContext;
   evalContext = comp;
   const prevFlags = comp._flags;
@@ -361,8 +373,6 @@ function endBatch(): void {
   if (--batchDepth > 0) {
     return;
   }
-  let error: unknown;
-  let hasError = false;
   while (batchedEffect !== undefined) {
     let eff: EffectNode | undefined = batchedEffect;
     batchedEffect = undefined;
@@ -387,22 +397,12 @@ function endBatch(): void {
       eff._nextBatchedEffect = undefined;
       eff._flags &= ~NOTIFIED;
       if (!(eff._flags & DISPOSED) && needsToRecompute(eff)) {
-        try {
-          runEffect(eff);
-        } catch (e) {
-          if (!hasError) {
-            error = e;
-            hasError = true;
-          }
-        }
+        runEffect(eff);
       }
       eff = next;
     }
   }
   batchIteration = 0;
-  if (hasError) {
-    throw error;
-  }
 }
 
 function runCleanup(eff: EffectNode): void {
@@ -421,6 +421,13 @@ function runCleanup(eff: EffectNode): void {
   }
 }
 
+// Contract: runEffect NEVER throws, and both callers depend on it.
+// Its body and its cleanup each route to safeCallHandler, which swallows even a
+// throwing handler; everything else here is a pointer walk over a well-formed
+// list. endBatch's drain and the effect() factory therefore call it bare. A
+// throw escaping this function would abandon the rest of the queued chain
+// mid-drain — the same shape of failure as the cycle bail's NOTIFIED leak. If
+// you add a statement here that can throw, wrap it HERE, not at the call sites.
 function runEffect(eff: EffectNode): void {
   // Run cleanup first (untracked)
   runCleanup(eff);
@@ -513,7 +520,6 @@ export function signal<T>(initial: T, options?: SignalOptions<T>): Signal<T> {
       }
       node._value = v;
       node._version++;
-      globalVersion++;
       startBatch();
       try {
         notifyTargets(node);
@@ -545,7 +551,6 @@ export function computed<T>(fn: () => T, options?: SignalOptions<T>): ReadonlySi
     _fn: fn,
     _equals:
       eq === false ? () => false : eq ? (a: unknown, b: unknown) => eq(a as T, b as T) : undefined,
-    _globalVersion: -1,
   };
 
   const c = {
@@ -603,11 +608,7 @@ export function effect(fn: () => Cleanup): () => void {
   };
 
   // Run immediately
-  try {
-    runEffect(eff);
-  } catch (e) {
-    safeCallHandler(e);
-  }
+  runEffect(eff);
 
   return () => {
     if (eff._flags & DISPOSED) {

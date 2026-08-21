@@ -9,10 +9,9 @@ contributor needs; org-wide defaults are inherited from
 ## Architecture
 
 There is **one** reactivity engine, in `src/signal.ts`: Preact-style
-doubly-linked source/target edges, pull-based glitch-free refresh, a global
-epoch plus per-node version fast-skip, and bitfield flags. Everything else is a
-thin facade or a consumer of that engine; do not introduce a second
-implementation.
+doubly-linked source/target edges, pull-based glitch-free refresh, per-node
+version fast-skip, and bitfield flags. Everything else is a thin facade or a
+consumer of that engine; do not introduce a second implementation.
 
 - `signal.ts` is the engine: `signal`, `computed`, `effect`, `batch`,
   `flushSync`, `untracked`, `on`, `subscribe`, the `isSignal`/`isComputed`

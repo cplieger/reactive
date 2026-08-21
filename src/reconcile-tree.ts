@@ -159,12 +159,18 @@ function nodeKey(node: Node): string {
   // precedence over the generic column key (`data-col`), so an element
   // carrying both keys by its entity identity — a generic first-in-attribute-
   // order `data-col` must not shadow it.
+  //
+  // The `data-col` scan is last-wins. The DOM keys attributes by (namespace,
+  // localName), so `setAttributeNS` with a foreign namespace and no prefix can
+  // put a second attribute whose `.name` is also "data-col" on the element;
+  // first-wins would key the node off the foreign one and refuse to match the
+  // author's own, destroying and recreating the node instead of reusing it.
   let colKey = "";
   for (const attr of (node as Element).attributes) {
     if (attr.name.endsWith("-id")) {
       return `${attr.name}=${attr.value}`;
     }
-    if (colKey === "" && attr.name === "data-col") {
+    if (attr.name === "data-col") {
       colKey = `${attr.name}=${attr.value}`;
     }
   }
@@ -181,9 +187,6 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
     if (!newEl.hasAttribute(attr.name)) {
       oldEl.removeAttribute(attr.name);
     }
-  }
-  if (oldEl.hidden !== newEl.hidden) {
-    oldEl.hidden = newEl.hidden;
   }
 
   // Unreflected live state. `checked` (input) and `selected` (option) are
