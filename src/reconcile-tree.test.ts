@@ -657,3 +657,16 @@ describe("nodeKey: which attributes act as a key", () => {
     expect(parent.children[1]!.getAttribute("class")).toBe("alpha");
   });
 });
+
+describe("patch: string children are never parsed as markup", () => {
+  it("turns a string that looks like HTML into one text node", () => {
+    expect.assertions(3);
+    const parent = document.createElement("div");
+    patch(parent, "<b>bold</b>");
+    // Same CSP-safe contract as el(): patch commits strings as text, so a
+    // reconciled upstream string cannot introduce an element.
+    expect(parent.children.length).toBe(0);
+    expect(parent.childNodes.length).toBe(1);
+    expect(parent.textContent).toBe("<b>bold</b>");
+  });
+});
