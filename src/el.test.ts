@@ -110,3 +110,15 @@ describe("el: property-set keys are not attributes", () => {
     expect(label.getAttribute("for")).toBe("field-1");
   });
 });
+
+describe("el: string children are never parsed as markup", () => {
+  it("turns a child that looks like HTML into one text node", () => {
+    expect.assertions(3);
+    const e = el("div", null, '<img src=x onerror="alert(1)">');
+    // The CSP-safe contract: a string child becomes a text node, so upstream
+    // text rendered through el() cannot introduce an element or a handler.
+    expect(e.children.length).toBe(0);
+    expect(e.childNodes.length).toBe(1);
+    expect(e.textContent).toBe('<img src=x onerror="alert(1)">');
+  });
+});
