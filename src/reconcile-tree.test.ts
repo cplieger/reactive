@@ -729,3 +729,29 @@ describe("patchAttrs: unreflected DOM properties", () => {
     expect(input.getAttribute("value")).toBe(null);
   });
 });
+
+describe("nodeKey: a foreign-namespace attribute of the same local name", () => {
+  it("does not hijack the data-col key", () => {
+    expect.assertions(3);
+    const parent = document.createElement("div");
+    const old = document.createElement("span");
+    // The DOM keys attributes by (namespace, localName), so this really is a
+    // second attribute whose `.name` is also "data-col" — two are constructible
+    // on one element, which a first-wins scan would key the node off.
+    old.setAttributeNS("http://example.com/ns", "data-col", "foreign");
+    old.setAttribute("data-col", "local");
+    old.textContent = "before";
+    parent.appendChild(old);
+
+    const next = document.createElement("span");
+    next.setAttribute("data-col", "local");
+    next.textContent = "after";
+    reconcileChildren(parent, [next]);
+
+    // The author's own attribute decides the key, so the node is reused and
+    // patched rather than destroyed and recreated.
+    expect(parent.children.length).toBe(1);
+    expect(parent.children[0]).toBe(old);
+    expect(old.textContent).toBe("after");
+  });
+});
