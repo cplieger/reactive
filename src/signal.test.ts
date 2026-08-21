@@ -785,6 +785,20 @@ describe("on", () => {
     expect(spy).toHaveBeenCalledWith(2);
   });
 
+  it("defer skips only the first call, never a later one", () => {
+    const s = signal(1);
+    const accessor = on(
+      () => s.value,
+      (v) => v * 10,
+      { defer: true },
+    );
+    expect(accessor()).toBeUndefined();
+    s.value = 2;
+    expect(accessor()).toBe(20);
+    s.value = 3;
+    expect(accessor()).toBe(30);
+  });
+
   it("provides prev value and prev result", () => {
     const s = signal(1);
     const results: unknown[] = [];
