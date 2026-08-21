@@ -5,7 +5,7 @@
 // refresh forever and the computed serves its pre-write value for the rest of
 // the program while the source it reads has already moved on.
 import { describe, it, expect, vi } from "vitest";
-import { signal, computed } from "./index.js";
+import { signal, computed, effect, setEffectErrorHandler } from "./index.js";
 
 describe("computed: a write during its own evaluation", () => {
   it("is observed by the next read of the computed", () => {
@@ -44,5 +44,39 @@ describe("computed: a write during its own evaluation", () => {
     expect(c.peek()).toBe(0);
     expect(c.peek()).toBe(1);
     expect(body).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not report a cycle when the computed already has a subscriber", () => {
+    const errors: unknown[] = [];
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
+    try {
+      const armed = signal(0);
+      const s = signal(0);
+      const c = computed(() => {
+        const on = armed.value;
+        const v = s.value;
+        if (on === 1) {
+          s.value = v + 1;
+        }
+        return v;
+      });
+      effect(() => {
+        void c.value;
+        return undefined;
+      });
+
+      // The computed now has a live subscriber, which is the shape where
+      // recursing out of a RUNNING node bites: the subscriber gets queued, the
+      // drain reaches it while the computed is still RUNNING, and the refresh
+      // reports a cycle that is not one.
+      armed.value = 1;
+
+      expect(errors).toEqual([]);
+      expect(s.peek()).toBe(1);
+    } finally {
+      setEffectErrorHandler(prev);
+    }
   });
 });
