@@ -712,7 +712,7 @@ describe("patchAttrs: unreflected DOM properties", () => {
     expect(second.selected).toBe(true);
   });
 
-  it("leaves a reused text input's value alone (unsupported by design)", () => {
+  it("replaces a reused text input's value on re-patch", () => {
     expect.assertions(3);
     const parent = document.createElement("div");
     patch(parent, el("input", { type: "text", "data-col": "keep", value: "rendered" }));
@@ -721,12 +721,71 @@ describe("patchAttrs: unreflected DOM properties", () => {
 
     patch(parent, el("input", { type: "text", "data-col": "keep", value: "rendered again" }));
 
-    // patch() reconciles the tree, not form state: syncing a live `value` would
-    // destroy in-progress typing and the caret, which needs a controlled-input
-    // contract this library does not offer (README: Unsupported by Design).
+    // `value` reflects to `defaultValue`, not to the live property, so the
+    // attribute loops above cannot carry it and a re-render could never replace
+    // the text in a field. The node is reused and the render owns the value.
     expect(parent.children[0]).toBe(input);
-    expect(input.value).toBe("what the user typed");
+    expect(input.value).toBe("rendered again");
     expect(input.getAttribute("value")).toBe(null);
+  });
+
+  it("replaces a reused textarea's value on re-patch", () => {
+    expect.assertions(2);
+    const parent = document.createElement("div");
+    patch(parent, el("textarea", { "data-col": "keep", value: "rendered" }));
+    const area = parent.children[0] as HTMLTextAreaElement;
+    area.value = "what the user typed";
+
+    patch(parent, el("textarea", { "data-col": "keep", value: "rendered again" }));
+
+    expect(parent.children[0]).toBe(area);
+    expect(area.value).toBe("rendered again");
+  });
+
+  it("clears a reused input whose new render supplies no value", () => {
+    expect.assertions(1);
+    const parent = document.createElement("div");
+    patch(parent, el("input", { type: "text", "data-col": "keep", value: "rendered" }));
+    (parent.children[0] as HTMLInputElement).value = "what the user typed";
+
+    // An omitted `value` is the empty default, exactly as `checked` treats an
+    // omitted flag as false. A render that says nothing about the field says it
+    // is empty, which is what a fresh mount of the same markup shows.
+    patch(parent, el("input", { type: "text", "data-col": "keep" }));
+
+    expect((parent.children[0] as HTMLInputElement).value).toBe("");
+  });
+
+  it("re-renders a whole form to the values a server supplied, not the ones abandoned in it", () => {
+    expect.assertions(4);
+    // The shape a settings pane takes: unkeyed nodes matched by position, a text
+    // field and a toggle side by side, re-rendered by a click (open, save, reset)
+    // rather than by a timer. Before this synced, a reset showed defaults in the
+    // toggle and the abandoned text in the field, and reopening a closed pane
+    // showed edits that were never saved.
+    const form = document.createElement("div");
+    const render = (name: string, enabled: boolean): void => {
+      patch(
+        form,
+        el("input", { type: "text", value: name }),
+        el("input", { type: "checkbox", checked: enabled }),
+      );
+    };
+
+    render("from the server", true);
+    const [nameField, toggle] = [
+      form.children[0] as HTMLInputElement,
+      form.children[1] as HTMLInputElement,
+    ];
+    nameField.value = "half-finished edit";
+    toggle.checked = false;
+
+    render("from the server", true);
+
+    expect(form.children[0]).toBe(nameField);
+    expect(form.children[1]).toBe(toggle);
+    expect(nameField.value).toBe("from the server");
+    expect(toggle.checked).toBe(true);
   });
 });
 
