@@ -189,28 +189,47 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
     }
   }
 
-  // Unreflected live state. `checked` (input) and `selected` (option) are
-  // dirty-flag IDL properties: their content attributes are the DEFAULTS
-  // (`defaultChecked` / `defaultSelected`), so the two loops above equalise the
-  // default and never the live value — without this, a keyed re-patch could not
-  // turn a checkbox off or move a selection, ever. Both are discrete booleans
-  // with no partial state, so the render output owns them.
+  // Unreflected live state. `checked` (input), `selected` (option) and the
+  // `value` of an input/textarea are dirty-flag IDL properties: their content
+  // attributes are the DEFAULTS (`defaultChecked` / `defaultSelected` /
+  // `defaultValue`), so the two loops above equalise the default and never the
+  // live value. Without this, a keyed re-patch could not turn a checkbox off,
+  // move a selection, or replace the text in a field, ever.
   //
-  // The live `value` of an input/textarea/select is deliberately NOT synced —
-  // see the README's Unsupported-by-Design table. Overwriting it would destroy
-  // in-progress typing and the caret, which needs the state ownership and
-  // change routing of a controlled-input contract that patch() does not have.
-  // `value` on an <option>/<progress>/<li> DOES reflect, so the loops above
-  // already carry it. `indeterminate` is unreflected too, but el() cannot set
-  // it, so it is outside patch()'s reach.
+  // Syncing `value` overwrites whatever a user has typed, and it moves the caret
+  // to the end. That is correct only where a re-render cannot land mid-keystroke,
+  // which is a property of the CONSUMER, not of this function: a form re-rendered
+  // by a click (open, save, reset) is safe, one re-rendered by a timer or a server
+  // push is not. The README records the obligation; a consumer in the second shape
+  // must drive the field from an effect instead of re-rendering over it.
+  //
+  // Not covered here: `value` on an <option>/<progress>/<li> DOES reflect, so the
+  // loops above already carry it. A <select>'s value is derived from its options,
+  // which the OPTION branch below reconciles. `indeterminate` is unreflected too,
+  // but el() cannot set it, so it is outside patch()'s reach.
   //
   // canPatch has already established that both nodes share a nodeName, so one
   // side decides the branch.
+  //
+  // Each `!==` guard is deliberate and no test here can pin it: assigning the
+  // same string to `.value` is a no-op through the DOM, but in a real browser it
+  // sets the dirty flag and moves the caret to the end, so an unconditional write
+  // would jump the caret on every re-render even when nothing changed. happy-dom
+  // exposes no caret, hence a permanently surviving `-> if (true)` mutant on each.
   if (oldEl.nodeName === "INPUT") {
     const oldInput = oldEl as HTMLInputElement;
     const newInput = newEl as HTMLInputElement;
     if (oldInput.checked !== newInput.checked) {
       oldInput.checked = newInput.checked;
+    }
+    if (oldInput.value !== newInput.value) {
+      oldInput.value = newInput.value;
+    }
+  } else if (oldEl.nodeName === "TEXTAREA") {
+    const oldArea = oldEl as HTMLTextAreaElement;
+    const newArea = newEl as HTMLTextAreaElement;
+    if (oldArea.value !== newArea.value) {
+      oldArea.value = newArea.value;
     }
   } else if (oldEl.nodeName === "OPTION") {
     const oldOption = oldEl as HTMLOptionElement;
