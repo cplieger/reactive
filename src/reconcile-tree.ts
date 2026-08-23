@@ -149,8 +149,8 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
       // requested node is a template and is not inserted.
       //
       // Re-inserting a node that is already in place still detaches and
-      // reattaches it, which blurs a focused input and drops a text selection
-      // inside it, so move only when the position actually differs.
+      // reattaches it, which blurs a focused input, so move only when the
+      // position actually differs.
       if (ref !== matched) {
         parent.insertBefore(matched, ref);
       }
@@ -246,12 +246,13 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
   // live value. Without this, a keyed re-patch could not turn a checkbox off,
   // move a selection, or replace the text in a field, ever.
   //
-  // Syncing `value` overwrites whatever a user has typed, and it moves the caret
-  // to the end. That is correct only where a re-render cannot land mid-keystroke,
-  // which is a property of the CONSUMER, not of this function: a form re-rendered
-  // by a click (open, save, reset) is safe, one re-rendered by a timer or a server
-  // push is not. The README records the obligation; a consumer in the second shape
-  // must drive the field from an effect instead of re-rendering over it.
+  // Syncing `value` overwrites whatever a user has typed, and a write that
+  // changes it also moves the caret to the end. That is correct only where a
+  // re-render cannot land mid-keystroke, which is a property of the CONSUMER, not
+  // of this function: a form re-rendered by a click (open, save, reset) is safe,
+  // one re-rendered by a timer or a server push is not. The README records the
+  // obligation; a consumer in the second shape must drive the field from an effect
+  // instead of re-rendering over it.
   //
   // Not covered here: `value` on an <option>/<progress>/<li> DOES reflect, so the
   // loops above already carry it. A <select>'s value is derived from its options,
@@ -261,13 +262,17 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
   // canPatch has already established that both nodes share a nodeName, so one
   // side decides the branch.
   //
-  // Each `!==` guard is deliberate: assigning the same string to `.value` sets
-  // the element's dirty-value flag and moves the caret to the end, so an
-  // unconditional write would jump the caret on every re-render even when nothing
-  // changed. The dirty-value, dirty-checkedness and dirtiness flags are what make
-  // "the re-patch did not write" observable as "the element still follows its
-  // content attribute" — all four guards are pinned behaviourally, with no spy
-  // and no caret.
+  // Each `!==` guard is deliberate: assigning to `.value` sets the element's
+  // dirty-value flag unconditionally, which severs the property from its content
+  // attribute for the rest of the element's life, and on a field holding raw
+  // content the value getter cannot see (`type=date`, `number`, `time`, `month`,
+  // `week`, `datetime-local`) it destroys what the user is half-way through
+  // typing. The caret is NOT the reason: per the HTML spec the text entry cursor
+  // moves only when the value actually changes, so a same-value write leaves it
+  // where it was. The dirty-value, dirty-checkedness and dirtiness flags are what
+  // make "the re-patch did not write" observable as "the element still follows
+  // its content attribute" — all four guards are pinned behaviourally, with no
+  // spy and no caret.
   if (oldEl.nodeName === "INPUT") {
     const oldInput = oldEl as HTMLInputElement;
     const newInput = newEl as HTMLInputElement;

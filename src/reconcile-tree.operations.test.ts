@@ -1,21 +1,23 @@
 // Structural tree-diff — the WORK a reconcile does, not just the tree it leaves.
 //
 // The point of reusing a node instead of recreating it is that the DOM is not
-// touched: a node that is re-inserted loses focus and selection, a text node
-// rewritten with the same string still wakes every MutationObserver watching it,
-// an attribute rewritten with the same value restarts a CSS transition, and a
-// live `value`/`checked`/`selected` written even with the identical value takes
+// touched: a node that is re-inserted loses focus, a text node rewritten with the
+// same string still wakes every MutationObserver watching it, an attribute
+// rewritten with the same value restarts a CSS transition, and a live
+// `value`/`checked`/`selected` written even with the identical value takes
 // permanent ownership of that state away from the content attribute (the DOM's
-// dirty-value / dirty-checkedness / dirtiness flags). All of that is invisible
-// in the resulting tree, so these tests observe the operations instead: a spy on
-// the parent's insertBefore (two of them, each declared at its site), a
-// MutationObserver's records, and — for the unreflected properties — the
-// attribute-reflection the flags switch off.
+// dirty-value / dirty-checkedness / dirtiness flags) and destroys raw input the
+// `value` getter cannot read. All of that is invisible in the resulting tree, so
+// these tests observe the operations instead: a spy on the parent's insertBefore
+// (two of them, each declared at its site), a MutationObserver's records,
+// `document.activeElement`, `validity.badInput`, and — for the unreflected
+// properties — the attribute-reflection the flags switch off.
 //
 // The last case is the mirror image: `patch` must reconcile the handlers it was
 // told about via trackHandler and leave every other property alone, including a
 // handler a consumer assigned directly after `patch` stopped tracking one.
 import { describe, it, expect, vi } from "vitest";
+import { userEvent } from "vitest/browser";
 import { el, patch, trackHandler } from "./index.js";
 
 function host(): HTMLElement {
@@ -42,7 +44,7 @@ describe("patch: an unchanged re-patch does no DOM work", () => {
     patch(parent, keyedRow("a", "A"), keyedRow("b", "B"), keyedRow("c", "C"));
 
     // Every node was already at its target index, so nothing may be re-inserted:
-    // in a browser each re-insert costs the node its focus and its selection.
+    // in a browser each re-insert costs the node its focus.
     expect(moves).not.toHaveBeenCalled();
     expect(Array.from(parent.children)).toEqual(reused);
     moves.mockRestore();
@@ -139,10 +141,44 @@ describe("patch: an unchanged re-patch does no DOM work", () => {
   });
 });
 
+describe("patch: a focused field survives a re-patch of the tree around it", () => {
+  it("keeps focus and caret on a field whose sibling changed", () => {
+    // The consequence the insertBefore spy above stands in for, stated directly.
+    // Detaching and reattaching a node blurs it, and Chromium blurs on ANY
+    // re-seat — `insertBefore(node, node)` and an `appendChild` of an already-last
+    // child included. The offsets themselves survive a re-seat, so
+    // `activeElement` is the assertion that can fail; the caret rides along to
+    // say what the user actually keeps.
+    const parent = host();
+    const render = (hint: string): void => {
+      patch(
+        parent,
+        el("input", { type: "text", "data-col": "name", value: "hello world" }),
+        el("span", { "data-col": "hint" }, hint),
+      );
+    };
+
+    render("old");
+    const field = parent.children[0] as HTMLInputElement;
+    field.focus();
+    field.setSelectionRange(5, 5);
+
+    render("new");
+
+    expect(document.activeElement).toBe(field);
+    expect([field.selectionStart, field.selectionEnd]).toEqual([5, 5]);
+  });
+});
+
 // The DOM's dirty flags are the reason each unreflected-property sync is guarded.
 // Writing `.checked` / `.value` / `.selected` — even the value already there —
 // severs the property from its content attribute for the rest of the element's
-// life, so a re-patch that changed nothing must not write.
+// life, so a re-patch that changed nothing must not write. That flag is set
+// unconditionally, and it is the whole consequence: the caret is not, because per
+// the HTML spec the text entry cursor moves only when the value actually changes,
+// so a same-value write leaves it where it was. The half of this a user can see is
+// pinned separately below, on a field whose raw content the `value` getter cannot
+// read.
 describe("patch: an unchanged re-patch does not take ownership of live state", () => {
   function checkbox(checked: boolean): HTMLInputElement {
     const el = document.createElement("input");
@@ -219,6 +255,60 @@ describe("patch: an unchanged re-patch does not take ownership of live state", (
 
     option.removeAttribute("selected");
     expect(option.selected).toBe(false);
+  });
+});
+
+describe("patch: an unchanged re-patch does not destroy input a user is mid-way through", () => {
+  // The user-visible half of the guards above, and it needs a real engine. An
+  // `<input type="date">` a user has half-filled reads `value === ""`, because the
+  // raw content does not parse yet — so a render that also says "" matches it and
+  // the guard skips the write. Written unconditionally, `.value = ""` clears that
+  // raw content and the half-typed date is gone from under the user. `value` is
+  // the only thing the guard's own comparison can see, so `validity.badInput` is
+  // what separates "did not write" from "wrote the same empty string".
+  //
+  // The caret cannot separate them: per the HTML spec the text entry cursor moves
+  // only when the value actually CHANGES, so a same-value write leaves it exactly
+  // where it was and a caret assertion here would pass with the guard removed.
+  async function halfType(field: HTMLInputElement, keys: string): Promise<void> {
+    await userEvent.click(field);
+    await userEvent.keyboard(keys);
+  }
+
+  it("keeps a half-typed date the value getter cannot see", async () => {
+    const parent = host();
+    const render = (): void => {
+      patch(parent, el("input", { type: "date", "data-col": "when" }));
+    };
+    render();
+    const field = parent.children[0] as HTMLInputElement;
+
+    await halfType(field, "12");
+    expect(field.value).toBe("");
+    expect(field.validity.badInput).toBe(true);
+
+    render(); // identical: nothing to sync
+
+    expect(parent.children[0]).toBe(field);
+    expect(field.validity.badInput).toBe(true);
+  });
+
+  it("keeps a half-typed number the value getter cannot see", async () => {
+    const parent = host();
+    const render = (): void => {
+      patch(parent, el("input", { type: "number", "data-col": "qty" }));
+    };
+    render();
+    const field = parent.children[0] as HTMLInputElement;
+
+    await halfType(field, "1e");
+    expect(field.value).toBe("");
+    expect(field.validity.badInput).toBe(true);
+
+    render(); // identical: nothing to sync
+
+    expect(parent.children[0]).toBe(field);
+    expect(field.validity.badInput).toBe(true);
   });
 });
 
