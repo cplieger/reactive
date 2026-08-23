@@ -373,12 +373,20 @@ function endBatch(): void {
   if (--batchDepth > 0) {
     return;
   }
+  // The drain is re-entrant: a write, a batch() or a flushSync() from an effect
+  // body sees batchDepth back at 0 and starts a nested drain, and the cycle guard
+  // below counts on those nested passes — a two-effect ping-pong recurses one
+  // level per pass rather than looping here. So a nested drain must RESTORE the
+  // count it inherited instead of zeroing it: zeroing let any nested drain,
+  // including a flushSync() that found nothing to flush, wipe the passes the
+  // enclosing drain had accumulated and multiply the effective cap.
+  const enclosingIteration = batchIteration;
   while (batchedEffect !== undefined) {
     let eff: EffectNode | undefined = batchedEffect;
     batchedEffect = undefined;
     batchIteration++;
     if (batchIteration > MAX_BATCH_ITERATIONS) {
-      batchIteration = 0;
+      batchIteration = enclosingIteration;
       // Un-notify the chain we are dropping: notifyTargets skips a NOTIFIED
       // effect, so an effect left NOTIFIED here could never be queued again —
       // bailing would silently deafen every effect in flight, including
@@ -402,7 +410,7 @@ function endBatch(): void {
       eff = next;
     }
   }
-  batchIteration = 0;
+  batchIteration = enclosingIteration;
 }
 
 function runCleanup(eff: EffectNode): void {
