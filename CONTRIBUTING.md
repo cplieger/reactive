@@ -88,12 +88,21 @@ Requires Node and npm. Install dependencies, then run the checks:
 
 ```sh
 npm ci
+npx --no-install playwright install chromium   # once per machine, see below
 npm run typecheck          # tsc -p tsconfig.json (source only)
 npm run typecheck:tests    # tsc -p tsconfig.tests.json (includes *.test.ts)
 npm test                   # vitest --run
 npx eslint .               # strict typed-linting (eslint.config.mjs)
 npx prettier --check .     # formatting (printWidth 100)
 ```
+
+The tests run in a real headless Chromium through Vitest Browser Mode, and the
+browser is a per-machine step rather than a per-clone one: `npm ci` brings the
+Playwright library but never the browser binary. Without it, `npm test` fails
+with a missing-executable error that reads like a test failure. Add
+`--with-deps` only on a bare container; a desktop already has the system
+libraries Chromium links against. CI installs the browser centrally, keyed on
+the `@vitest/browser-playwright` devDependency.
 
 The `typecheck` scripts run `tsc`, the TypeScript 7 native compiler. It comes
 from the `@typescript/native` devDependency (an npm alias for `typescript@7`),
@@ -125,8 +134,12 @@ locally reproduces it.
   (`signal*.test.ts` and `signal.property.test.ts`) deliberately probe the
   invariants above; if you change the engine, run them and add cases rather
   than weakening them.
-- **DOM tests** run under `happy-dom` (configured in `vitest.config.ts`), so
-  DOM globals are available in tests without a browser.
+- **DOM tests** run in a real headless Chromium through Vitest Browser Mode
+  (configured in `vitest.config.ts`), so every test file gets a real DOM with no
+  environment to select and no per-file pragma. The dirty-value,
+  dirty-checkedness and dirtiness flags `patch()` reasons about are the real
+  ones, and so is the caret; write assertions a real engine can satisfy rather
+  than ones that only held while the DOM was emulated.
 
 ## Publishing
 
