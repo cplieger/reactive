@@ -2,7 +2,7 @@
 // correctness, dispose/leak, cycle detection, re-entrancy, batch interleaving,
 // synchronous scheduling, peek/flush semantics, and effect lifecycle.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { signal, effect, batch, computed, setEffectErrorHandler, flushSync } from "./index.js";
+import { signal, effect, batch, computed, setEffectErrorHandler } from "./index.js";
 import type { ReadonlySignal } from "./index.js";
 
 describe("dispose / leak", () => {
@@ -256,21 +256,8 @@ describe("re-entrancy", () => {
   });
 });
 
-describe("flushSync", () => {
-  it("is a no-op when nothing is pending", () => {
-    const s = signal(0);
-    const spy = vi.fn();
-    effect(() => {
-      spy(s.value);
-      return undefined;
-    });
-    spy.mockClear();
-    // Writes flush immediately, so flushSync with nothing pending does nothing.
-    flushSync();
-    expect(spy).not.toHaveBeenCalled();
-  });
-
-  it("is a no-op inside a batch", () => {
+describe("batch defers, and the write outside it does not", () => {
+  it("runs no effect while the batch is open and one at its end", () => {
     const s = signal(0);
     const spy = vi.fn();
     effect(() => {
@@ -280,9 +267,20 @@ describe("flushSync", () => {
     spy.mockClear();
     batch(() => {
       s.value = 1;
-      flushSync(); // should be no-op inside batch
       expect(spy).not.toHaveBeenCalled();
     });
+    expect(spy).toHaveBeenCalledWith(1);
+  });
+
+  it("runs the effect before a bare write returns", () => {
+    const s = signal(0);
+    const spy = vi.fn();
+    effect(() => {
+      spy(s.value);
+      return undefined;
+    });
+    spy.mockClear();
+    s.value = 1;
     expect(spy).toHaveBeenCalledWith(1);
   });
 });

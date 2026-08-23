@@ -25,6 +25,37 @@ The store, `SignalMap`, and `Collection` are thin facades over a single signal e
 
 Mirrors semantics from @preact/signals-core and solid-js reactivity.
 
+## Flush model
+
+One phase, and this is the whole of it.
+
+**A write flushes.** When `sig.value = x` returns, every effect that depends on
+`sig` has already re-run. The setter notifies and drains before it returns, so
+there is no pending-effect state a caller can observe and no queue to drain. Read
+the DOM on the next statement and you are reading what the effects wrote. Same
+contract as [@preact/signals-core](https://github.com/preactjs/signals/blob/main/packages/core/README.md),
+this engine's baseline.
+
+**`batch(fn)` is the only deferral.** Inside a batch, writes coalesce and effects
+are held; they run once, synchronously, when the _outermost_ batch returns. A
+nested batch defers to its outermost, and a throwing body still flushes.
+
+**Deferral beyond that is yours.** To get effects on a later task, write on a
+later task:
+
+```typescript
+queueMicrotask(() => {
+  count.value = next; // effects run inside this microtask
+});
+```
+
+There is deliberately **no flush barrier** — no `flushSync()`, no `nextTick()`.
+A barrier is the API a _deferred_ model owes its callers (Vue's `nextTick`,
+React's `flushSync`); an eager model never holds work, so it has nothing to
+report on and nothing to force. `flushSync()` existed through v1.x, could never
+find work pending, and refused to act when work was pending inside a batch; it
+was removed in v2.0.0. If you were calling it, delete the call — it was a no-op.
+
 ## Install
 
 ```sh
@@ -84,8 +115,7 @@ isComputed(doubled); // true
 - `signal<T>(initial, options?): Signal<T>`: reactive value with `.value` getter/setter and `.peek()`. Options: `{ equals?: false | ((prev, next) => boolean) }`
 - `computed<T>(fn, options?): ReadonlySignal<T>`: lazy cached derived signal (glitch-free, equality-deduped). Options: `{ equals?: false | ((prev, next) => boolean) }`
 - `effect(fn: () => Cleanup): () => void`: auto-tracking side-effect with cleanup support. `fn` must return `undefined` or a cleanup function.
-- `batch(fn)`: coalesce signal writes; effects flush synchronously at end of outermost batch
-- `flushSync()`: synchronously drain pending effects (no-op inside batch)
+- `batch(fn)`: coalesce signal writes; effects flush synchronously at end of outermost batch. The only deferral — see [Flush model](#flush-model)
 - `untracked<T>(fn): T`: run fn without tracking signal reads (like Preact `untracked()` / Solid `untrack()`)
 - `on(deps, fn, options?): () => U`: explicit dependency declaration helper (like Solid `on()`); pass into `effect()` or `computed()`. With `{ defer: true }` the accessor returns `() => U | undefined`: the deferred first call yields `undefined`.
 - `subscribe(signal, cb): () => void`: subscribe to a signal, calling cb immediately and on every change. The callback runs untracked: signals read inside it do not become dependencies of the subscription
@@ -105,7 +135,7 @@ isComputed(doubled); // true
 
 `createStore` and `SignalMap` are thin facades over the one signal engine. `createStore` lazily backs each key with a signal; `SignalMap` is a registry of signals keyed by a runtime string id.
 
-- `createStore<M>(): Store<M>`: typed, fixed-key reactive store with `get`, `set`, `subscribe`, `effect`, `computed`, and `batch`. `subscribe` notifies on change only (not immediately on subscribe), and its callback runs untracked. `computed(outputKey, fn)` is an eager effect, not a lazy engine computed: it writes `outputKey` on every dependency change. So `fn` runs whether or not anyone reads the key; a throwing `fn` routes to the effect error handler instead of being cached and rethrown at the read site; `set(outputKey, …)` still works between recomputes. A `computed` key whose fn reads its own output does not loop unbounded: a self-read that keeps yielding new values surfaces `Error("Cycle detected")` through the effect error handler, while a stable self-read settles. The guard re-arms per write: a key that is still cyclic reports again on the next write to it rather than reporting once and going quiet, and effects merely queued alongside the cycle (a `subscribe` on the same key, say) stay reactive.
+- `createStore<M>(): Store<M>`: typed, fixed-key reactive store with `get`, `set`, `subscribe`, and `computed`. A member exists here only where it does something the engine's namesake does not, so `effect` and `batch` are **not** on the store (removed in v2.0.0) — import them from the package root; `store.batch(…)` read as "batch this store's writes" while batching the whole graph. `subscribe` notifies on change only (not immediately on subscribe), and its callback runs untracked. `computed(outputKey, fn)` is an eager effect, not a lazy engine computed: it writes `outputKey` on every dependency change. So `fn` runs whether or not anyone reads the key; a throwing `fn` routes to the effect error handler instead of being cached and rethrown at the read site; `set(outputKey, …)` still works between recomputes. A `computed` key whose fn reads its own output does not loop unbounded: a self-read that keeps yielding new values surfaces `Error("Cycle detected")` through the effect error handler, while a stable self-read settles. The guard re-arms per write: a key that is still cyclic reports again on the next write to it rather than reporting once and going quiet, and effects merely queued alongside the cycle (a `subscribe` on the same key, say) stay reactive.
 - `SignalMap<V>`: dynamic per-id signal registry: `get(id)`, `ensure(id, initial)`, `clear(id)`, `clearAll()`. For reactive state whose key set isn't known at the type level (per-message streaming text, per-row state, …); complements `createStore`'s fixed key set.
 
 ### Collections
@@ -136,7 +166,7 @@ State lives in signals; discrete events go on a bus. `createBus` is the typed ev
 - **Cycle detection**: Reading a computed that is currently being computed throws `Error("Cycle detected")`.
 - **Error caching**: If a computed's fn throws, the error is cached and rethrown on subsequent reads until dependencies change.
 - **Computed is read-only**: Setting `.value` on a computed throws `Error("Cannot set a computed signal")`.
-- **Synchronous batch**: `batch()` flushes effects synchronously at the end of the outermost batch (matching @preact/signals-core and solid-js).
+- **Synchronous batch**: `batch()` flushes effects synchronously at the end of the outermost batch (matching @preact/signals-core and solid-js). It is the only deferral the library has; a bare write flushes before it returns. See [Flush model](#flush-model).
 
 ## Unsupported by Design
 
@@ -153,7 +183,8 @@ The following features are intentionally NOT implemented:
 | **SSR / server-side isolation**                   | Client-side library. Server usage should instantiate fresh signal graphs per request.                                                                                                                                                                                                                                          |
 | **Async signals / resources**                     | Out of scope. Use effects + manual signal writes for async data loading.                                                                                                                                                                                                                                                       |
 | **Transactions**                                  | Framework-level concern. Not a signals primitive.                                                                                                                                                                                                                                                                              |
-| **Custom scheduler / `setScheduler()`**           | Batch is synchronous. No scheduler needed.                                                                                                                                                                                                                                                                                     |
+| **Custom scheduler / `setScheduler()`**           | Batch is synchronous and a write flushes before it returns, so there is no queue to schedule. Deferral is the caller's: write on a later task. See [Flush model](#flush-model).                                                                                                                                                |
+| **A flush barrier (`flushSync`, `nextTick`)**     | A barrier is what a deferred model owes its callers; this model never holds work, so a barrier has nothing to report on. `flushSync()` shipped through v1.x and was a no-op from every position a caller could occupy; removed in v2.0.0.                                                                                      |
 | **Controlled form inputs**                        | `patch()` syncs `checked`, `selected` and `input`/`textarea` `value`, so the render owns them. It has no change routing or state ownership, so a surface re-rendered while a user types must own the field itself.                                                                                                             |
 | **Waking subscribers of a self-writing computed** | A computed that writes a signal it reads is re-read correctly (it is marked stale so the next read re-runs it), but its own subscribers are not woken, so an effect depending on it does not re-run until something else notifies it. Writing a source from a computed body is outside the intended shape; do it in an effect. |
 
