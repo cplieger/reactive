@@ -3,9 +3,34 @@
 // per-node version fast-skip, bitfield flags.
 // Apache-2.0.
 //
+// FLUSH MODEL — one phase, and the whole of it:
+//   1. A write flushes. When `sig.value = x` returns, every effect that depends
+//      on `sig` has already re-run. The setter opens an implicit batch, notifies,
+//      and drains before it returns, so there is no pending-effect state a caller
+//      can observe and no queue to drain.
+//   2. `batch(fn)` is the only deferral. Writes inside it coalesce; effects are
+//      held and run once, synchronously, when the OUTERMOST batch returns.
+//   3. Deferral beyond that is the caller's. To get effects on a later task,
+//      write on a later task (queueMicrotask, requestAnimationFrame). This module
+//      owns no scheduler and offers no flush barrier, because it never holds work.
+//
+// Clause 3 is why there is no `flushSync()`. A flush barrier is the API a
+// DEFERRED model owes its callers — Vue's `nextTick`, React's `flushSync` — and
+// an eager one owes none. The export existed until v2.0.0, could never find work
+// pending (endBatch drains the moment the depth reaches 0) and refused to act
+// when work WAS pending (it returned early above depth 0), so it was a no-op from
+// every position a caller could occupy; six mutants over its body were
+// permanently unkillable, and 71 consumer call sites had never done anything.
+// Anything reintroducing a barrier here is reintroducing that: the barrier is not
+// the missing piece, clause 1 is.
+//
 // Port provenance: graph/scheduler semantics verified against
-// @preact/signals-core@1.14.4 (drift audit 2026-07-17). Deliberate deltas
-// from upstream, pinned by tests: Object.is equality incl. NaN (upstream:
+// @preact/signals-core@1.14.4 (drift audit 2026-07-17). The flush model above is
+// upstream's, including the absence of a barrier: upstream documents the write
+// contract in prose ("Changing a signal's value synchronously updates every
+// computed and effect that depends on that signal") and its surface is
+// signal/computed/effect/batch/untracked/createModel. Deliberate deltas from
+// upstream, pinned by tests: Object.is equality incl. NaN (upstream:
 // `!==`); custom `equals` / `equals: false` options (upstream has none);
 // isolate-and-continue effect error policy via setEffectErrorHandler
 // (upstream disposes-and-rethrows); the cycle guard lives in endBatch's drain
@@ -373,13 +398,13 @@ function endBatch(): void {
   if (--batchDepth > 0) {
     return;
   }
-  // The drain is re-entrant: a write, a batch() or a flushSync() from an effect
-  // body sees batchDepth back at 0 and starts a nested drain, and the cycle guard
-  // below counts on those nested passes — a two-effect ping-pong recurses one
-  // level per pass rather than looping here. So a nested drain must RESTORE the
-  // count it inherited instead of zeroing it: zeroing let any nested drain,
-  // including a flushSync() that found nothing to flush, wipe the passes the
-  // enclosing drain had accumulated and multiply the effective cap.
+  // The drain is re-entrant: a write or a batch() from an effect body sees
+  // batchDepth back at 0 and starts a nested drain, and the cycle guard below
+  // counts on those nested passes — a two-effect ping-pong recurses one level per
+  // pass rather than looping here. So a nested drain must RESTORE the count it
+  // inherited instead of zeroing it: zeroing let any nested drain, including an
+  // empty `batch(() => {})`, wipe the passes the enclosing drain had accumulated
+  // and multiply the effective cap.
   const enclosingIteration = batchIteration;
   while (batchedEffect !== undefined) {
     let eff: EffectNode | undefined = batchedEffect;
@@ -626,7 +651,8 @@ export function effect(fn: () => Cleanup): () => void {
   };
 }
 
-/** Coalesce signal writes; effects flush synchronously at end of outermost batch. */
+/** Coalesce signal writes; effects flush synchronously at end of outermost batch.
+ *  This is the library's ONLY deferral: see the flush model in the module header. */
 export function batch(fn: () => void): void {
   startBatch();
   try {
@@ -634,15 +660,6 @@ export function batch(fn: () => void): void {
   } finally {
     endBatch();
   }
-}
-
-/** Flush all pending effects synchronously. No-op inside batch(). */
-export function flushSync(): void {
-  if (batchDepth > 0) {
-    return;
-  }
-  startBatch();
-  endBatch();
 }
 
 /** Run fn without tracking any signal reads. */

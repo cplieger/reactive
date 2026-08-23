@@ -2,7 +2,6 @@ export {
   signal,
   effect,
   batch,
-  flushSync,
   setEffectErrorHandler,
   computed,
   untracked,

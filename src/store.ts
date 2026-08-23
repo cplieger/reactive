@@ -3,22 +3,32 @@
 // Each key is backed by a lazily-created signal, so the store inherits the
 // engine's glitch-freedom, cycle detection, batching, and error handling.
 // There is NO separate reactivity implementation here: get/set read and
-// write signals, effect/batch are the engine's own, and auto-tracking falls
-// out of reading `signal.value` inside an effect.
+// write signals, and auto-tracking falls out of reading `signal.value` inside an
+// effect.
+//
+// The member set is decided by one rule: a Store member exists only where it
+// does something the engine's namesake does NOT. `subscribe` skips the initial
+// call and runs untracked; `computed` is an eager key-writing effect rather than
+// a lazy signal. `effect` and `batch` were the engine's own function objects
+// verbatim and are NOT re-exposed here (removed in v2.0.0) — `store.batch(…)`
+// read as "batch this store's writes" while batching the whole graph, which is a
+// scope the flush model does not have. Import `batch` and `effect` from the
+// package root beside `createStore`.
 //
 // Usage:
-//   import { createStore } from './store.js';
+//   import { createStore, batch, effect } from '@cplieger/reactive';
 //   interface MyMap { count: number; name: string }
-//   const { get, set, subscribe, effect, computed, batch } = createStore<MyMap>();
+//   const { get, set, subscribe, computed } = createStore<MyMap>();
 
-import { signal, effect, batch, untracked, type Signal, type Cleanup } from "./signal.js";
+import { signal, effect, untracked, type Signal } from "./signal.js";
 
-/** A typed per-key reactive store with auto-tracked effects, computed, and batching. */
+/** A typed per-key reactive store: lazily signal-backed keys, change-only
+ *  subscriptions, and eager derived keys. Effects and batching are the engine's
+ *  own `effect` / `batch`, imported from the package root. */
 export interface Store<M> {
   get<K extends keyof M & string>(key: K): M[K];
   set<K extends keyof M & string>(key: K, value: M[K]): void;
   subscribe<K extends keyof M & string>(key: K, cb: (value: M[K]) => void): () => void;
-  effect(fn: () => Cleanup): () => void;
   /** Derive `outputKey` from other keys. NOT a lazy engine `computed`: this is
    *  an EAGER effect that re-runs `fn` on dependency change and WRITES the
    *  result to `outputKey`. Consequences of that shape: `fn` runs whether or
@@ -28,7 +38,6 @@ export interface Store<M> {
    *  self-reading `fn` behaves as documented on the implementation below.
    *  Returns the effect's dispose function. */
   computed<K extends keyof M & string>(outputKey: K, fn: () => M[K]): () => void;
-  batch(fn: () => void): void;
 }
 
 /** Create a typed reactive store. Keys are lazily backed by signals; reading a
@@ -84,5 +93,5 @@ export function createStore<M>(): Store<M> {
     });
   }
 
-  return { get, set, subscribe, effect, computed, batch };
+  return { get, set, subscribe, computed };
 }

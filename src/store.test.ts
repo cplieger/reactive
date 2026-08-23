@@ -1,6 +1,11 @@
 // Typed per-key reactive store (facade over the signal engine).
+//
+// `batch` and `effect` come from the package root, not off the Store: they are the
+// engine's own functions and the Store no longer re-exposes them (v2.0.0). A test
+// that used `store.batch(…)` is asserting a property of the ENGINE's batch reached
+// through a store's keys, which is what these still do.
 import { describe, it, expect, vi } from "vitest";
-import { createStore, setEffectErrorHandler } from "./index.js";
+import { batch, createStore, effect, setEffectErrorHandler } from "./index.js";
 
 describe("createStore", () => {
   it("get/set round-trip", () => {
@@ -65,7 +70,7 @@ describe("createStore", () => {
     const spyB = vi.fn();
     store.subscribe("a", spyA);
     store.subscribe("b", spyB);
-    store.batch(() => {
+    batch(() => {
       store.set("a", 1);
       store.set("b", 2);
       store.set("a", 10);
@@ -76,11 +81,11 @@ describe("createStore", () => {
 
   it("effect auto-tracks keys", () => {
     expect.assertions(2);
-    const { get, set, effect: eff } = createStore<{ x: number; y: number }>();
+    const { get, set } = createStore<{ x: number; y: number }>();
     set("x", 0);
     set("y", 0);
     const spy = vi.fn();
-    eff(() => {
+    effect(() => {
       spy(get("x"));
     });
     spy.mockClear();
@@ -94,10 +99,10 @@ describe("createStore", () => {
 
   it("effect cleanup runs on re-execution", () => {
     expect.assertions(1);
-    const { get, set, effect: eff } = createStore<{ n: number }>();
+    const { get, set } = createStore<{ n: number }>();
     set("n", 0);
     const order: string[] = [];
-    eff(() => {
+    effect(() => {
       const v = get("n");
       order.push(`run:${v}`);
       return () => {
@@ -110,10 +115,10 @@ describe("createStore", () => {
 
   it("effect disposal", () => {
     expect.assertions(1);
-    const { get, set, effect: eff } = createStore<{ n: number }>();
+    const { get, set } = createStore<{ n: number }>();
     set("n", 0);
     const spy = vi.fn();
-    const dispose = eff(() => {
+    const dispose = effect(() => {
       spy(get("n"));
     });
     spy.mockClear();
@@ -146,12 +151,12 @@ describe("createStore", () => {
 
   it("dynamic deps in effect", () => {
     expect.assertions(1);
-    const { get, set, effect: eff } = createStore<{ cond: boolean; a: number; b: number }>();
+    const { get, set } = createStore<{ cond: boolean; a: number; b: number }>();
     set("cond", true);
     set("a", 1);
     set("b", 2);
     const spy = vi.fn();
-    eff(() => {
+    effect(() => {
       spy(get("cond") ? get("a") : get("b"));
     });
     spy.mockClear();
@@ -194,7 +199,7 @@ describe("createStore: error handling", () => {
     const spy = vi.fn();
     store.subscribe("x", spy);
     try {
-      store.batch(() => {
+      batch(() => {
         throw new Error("batch err");
       });
     } catch {
@@ -216,7 +221,7 @@ describe("createStore: deep nesting and dispose-from-cleanup", () => {
         fn();
         return;
       }
-      store.batch(() => {
+      batch(() => {
         nest(depth - 1, fn);
       });
     };
@@ -234,7 +239,7 @@ describe("createStore: deep nesting and dispose-from-cleanup", () => {
       store.set(`k${i}` as never, i as never);
     }
     const spy = vi.fn();
-    store.effect(() => {
+    effect(() => {
       let sum = 0;
       for (let i = 0; i < 100; i++) {
         sum += store.get(`k${i}` as never) as number;
@@ -252,7 +257,7 @@ describe("createStore: deep nesting and dispose-from-cleanup", () => {
     const store = createStore<{ x: number }>();
     store.set("x", 0);
     let disposeRef: (() => void) | null = null;
-    disposeRef = store.effect(() => {
+    disposeRef = effect(() => {
       void store.get("x");
       return () => {
         if (disposeRef) {
@@ -269,7 +274,7 @@ describe("createStore: deep nesting and dispose-from-cleanup", () => {
     const store = createStore<{ x: number }>();
     store.set("x", 0);
     let cleanupCount = 0;
-    const dispose = store.effect(() => {
+    const dispose = effect(() => {
       void store.get("x");
       return () => {
         cleanupCount++;
@@ -291,7 +296,7 @@ describe("createStore: batch + computed + effect interleaving", () => {
     expect(store.get("sum")).toBe(3);
     const spy = vi.fn();
     store.subscribe("sum", spy);
-    store.batch(() => {
+    batch(() => {
       store.set("a", 10);
       store.set("b", 20);
     });
@@ -302,13 +307,13 @@ describe("createStore: batch + computed + effect interleaving", () => {
     const store = createStore<{ x: number }>();
     store.set("x", 0);
     const spy = vi.fn();
-    store.effect(() => {
+    effect(() => {
       if (store.get("x") === 1) {
         throw new Error("store effect boom");
       }
       return undefined;
     });
-    store.effect(() => {
+    effect(() => {
       spy(store.get("x"));
       return undefined;
     });
@@ -330,7 +335,7 @@ describe("createStore: effect cleanup throwing", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
       /* noop */
     });
-    store.effect(() => {
+    effect(() => {
       values.push(store.get("x"));
       return () => {
         throw new Error("store-cleanup-boom");
@@ -350,7 +355,7 @@ describe("createStore: effect cleanup throwing", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {
       /* noop */
     });
-    const dispose = store.effect(() => {
+    const dispose = effect(() => {
       void store.get("x");
       return () => {
         throw new Error("store-dispose-cleanup");
@@ -374,7 +379,7 @@ describe("createStore: mass dispose does not leak subscriptions", () => {
       const spy = vi.fn();
       spies.push(spy);
       disposers.push(
-        store.effect(() => {
+        effect(() => {
           spy(store.get("k"));
           return () => {
             throw new Error(`store-leak-${i}`);
@@ -409,7 +414,7 @@ describe("createStore: subscriber throw during batch", () => {
     });
     const spy = vi.fn();
     store.subscribe("b", spy);
-    store.batch(() => {
+    batch(() => {
       store.set("a", 1);
       store.set("b", 2);
     });

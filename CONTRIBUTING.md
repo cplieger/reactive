@@ -14,12 +14,19 @@ version fast-skip, and bitfield flags. Everything else is a thin facade or a
 consumer of that engine; do not introduce a second implementation.
 
 - `signal.ts` is the engine: `signal`, `computed`, `effect`, `batch`,
-  `flushSync`, `untracked`, `on`, `subscribe`, the `isSignal`/`isComputed`
-  guards, and `setEffectErrorHandler`.
+  `untracked`, `on`, `subscribe`, the `isSignal`/`isComputed` guards, and
+  `setEffectErrorHandler`. Its header states the FLUSH MODEL — a write flushes
+  before it returns, `batch` is the only deferral, and deferral beyond that is
+  the caller's. Read it before changing anything in `endBatch` or a setter, and
+  note the clause that closes the door the removed `flushSync` came through: a
+  flush barrier is what a deferred model owes its callers, and this one is not
+  deferred.
 - `store.ts` (`createStore`) and `signal-map.ts` (`SignalMap`) are facades over
   the engine. `createStore` lazily backs each fixed key with a signal;
   `SignalMap` is a dynamic per-id signal registry. Because they sit on the one
-  engine, they inherit glitch-freedom and cycle detection.
+  engine, they inherit glitch-freedom and cycle detection. A `Store` member
+  exists only where it does something the engine's namesake does not — which is
+  why `subscribe` and `computed` are there and `effect`/`batch` are not.
 - `collection.ts` (`createCollection`) is an ordered keyed collection built on
   `signal` + `SignalMap`. Two tiers: per-entity signals plus one structure
   signal (`ids`).
