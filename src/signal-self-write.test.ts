@@ -80,3 +80,75 @@ describe("computed: a write during its own evaluation", () => {
     }
   });
 });
+
+describe("computed: successive reads of a self-writing computed", () => {
+  it("converges instead of freezing on the first value that repeated", () => {
+    const s = signal(0);
+    const body = vi.fn(() => {
+      const v = s.value;
+      if (v < 2) {
+        s.value = v + 1;
+      }
+      return v < 2 ? "pending" : `done:${String(v)}`;
+    });
+    const c = computed(body);
+
+    // Runs 1 and 2 both return "pending", so the equality check says unchanged —
+    // and the unchanged path is exactly where the staleness recorded during the
+    // evaluation could be thrown away, freezing the computed on "pending" while
+    // its source has already moved past the value that produced it.
+    expect(c.value).toBe("pending");
+    expect(c.value).toBe("pending");
+    expect(c.value).toBe("done:2");
+    expect(body).toHaveBeenCalledTimes(3);
+
+    // Settled: the third run wrote nothing, so nothing is stale.
+    expect(c.value).toBe("done:2");
+    expect(body).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("computed: a refresh demanded while the computed is mid-evaluation", () => {
+  it("reports a cycle instead of re-entering the evaluation", () => {
+    const errors: unknown[] = [];
+    const prev = setEffectErrorHandler((e) => {
+      errors.push(e);
+    });
+    try {
+      const armed = signal(0);
+      const s = signal(0);
+      const c = computed(() => {
+        const on = armed.value;
+        const v = s.value;
+        if (on === 1) {
+          s.value = v + 1;
+        }
+        return v;
+      });
+      const seen: number[] = [];
+      // The subscriber depends on `s` as well as on `c`. That is what makes the
+      // write inside `c`'s own body queue this effect and drain it while `c` is
+      // still RUNNING — the case the sibling test above cannot reach, because a
+      // subscriber that reads only `c` has already been dequeued by then.
+      effect(() => {
+        void s.value;
+        seen.push(c.value);
+        return undefined;
+      });
+      expect(seen).toEqual([0]);
+
+      armed.value = 1;
+
+      // Re-entering would recompute from a half-prepared dependency set and
+      // write `s` again on every pass, so the guard reports rather than recurses.
+      expect(errors.map((e) => (e instanceof Error ? e.message : String(e)))).toEqual([
+        "Cycle detected",
+      ]);
+      // Exactly one pass wrote, so `s` advanced exactly once.
+      expect(s.peek()).toBe(1);
+      expect(seen).toEqual([0]);
+    } finally {
+      setEffectErrorHandler(prev);
+    }
+  });
+});
