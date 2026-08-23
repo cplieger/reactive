@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 // Structural tree-diff — the WORK a reconcile does, not just the tree it leaves.
 //
 // The point of reusing a node instead of recreating it is that the DOM is not
@@ -53,9 +52,10 @@ describe("patch: an unchanged re-patch does no DOM work", () => {
     // The operations-level statement of what identity matching buys. Handing a
     // parent its own children unchanged is what a re-render after a no-op state
     // change looks like; every node is already seated, so nothing may be touched.
-    // Second spy, declared: `insertBefore(node, node)` emits no MutationObserver
-    // record under happy-dom and preserves focus, so there is no behavioural
-    // instrument for "it did not move a node that was already in place".
+    // Second spy, declared: what is under test is the ABSENCE of DOM work, and a
+    // re-insert that lands a node back at the index it already occupies leaves an
+    // identical tree behind, so the tree itself cannot tell "moved" from "not
+    // moved". The spy is the only instrument that can.
     const parent = host();
     patch(parent, el("div", null, "A"), el("div", null, "B"), el("div", null, "C"));
     const own = Array.from(parent.childNodes);

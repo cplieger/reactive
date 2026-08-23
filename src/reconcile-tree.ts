@@ -261,13 +261,13 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
   // canPatch has already established that both nodes share a nodeName, so one
   // side decides the branch.
   //
-  // Each `!==` guard is deliberate: assigning the same string to `.value` is a
-  // no-op through the DOM, but in a real browser it sets the dirty flag and moves
-  // the caret to the end, so an unconditional write would jump the caret on every
-  // re-render even when nothing changed. happy-dom 20.11.6 models the dirty-value,
-  // dirty-checkedness and dirtiness flags, so "the re-patch did not write" is
-  // observable as "the element still follows its content attribute" — all four
-  // guards are pinned behaviourally, with no spy and no caret.
+  // Each `!==` guard is deliberate: assigning the same string to `.value` sets
+  // the element's dirty-value flag and moves the caret to the end, so an
+  // unconditional write would jump the caret on every re-render even when nothing
+  // changed. The dirty-value, dirty-checkedness and dirtiness flags are what make
+  // "the re-patch did not write" observable as "the element still follows its
+  // content attribute" — all four guards are pinned behaviourally, with no spy
+  // and no caret.
   if (oldEl.nodeName === "INPUT") {
     const oldInput = oldEl as HTMLInputElement;
     const newInput = newEl as HTMLInputElement;

@@ -1,4 +1,3 @@
-// @vitest-environment happy-dom
 // Identity-first matching: a node the caller hands back is its own match.
 //
 // The measured fault these pin is not "a child goes missing" — the overlap
