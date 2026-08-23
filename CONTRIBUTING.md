@@ -36,8 +36,12 @@ consumer of that engine; do not introduce a second implementation.
 - `el.ts` (`el`) is the CSP-safe element factory. String children become text
   nodes (never parsed as HTML).
 - `reconcile.ts` (`reconcile`, `KEY_ATTR`) and `reconcile-tree.ts` (`patch`,
-  `reconcileChildren`, `trackHandler`) handle keyed-list reconciliation and
-  structural tree-diffing.
+  `trackHandler`) handle keyed-list reconciliation and structural tree-diffing.
+  Both resolve correspondence the same way — consume from a pool of the parent's
+  current children, each claimed at most once. `reconcileChildren` is
+  `reconcile-tree.ts`'s internal core and is deliberately not exported from
+  `index.ts`: `patch(parent, ...nodes)` is the same call with string, fragment
+  and nullish handling on top.
 - `bus.ts` (`createBus`) is the typed event primitive. State lives in signals;
   discrete events go on the bus.
 

@@ -4,7 +4,7 @@
 // keyed reuse, or the tag-mismatch (!canPatch) replacement path is caught too.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { reconcileChildren } from "./index.js";
+import { reconcileChildren } from "./reconcile-tree.js";
 
 interface ChildSpec {
   tag: string;
@@ -80,21 +80,60 @@ type MixedSpec =
   | { kind: "text"; text: string }
   | { kind: "comment"; text: string };
 
-const mixedListArb = fc.array(
-  fc.oneof(
-    fc.record({
-      kind: fc.constant("el" as const),
-      tag: fc.constantFrom("div", "span", "p"),
-      key: fc.option(fc.constantFrom("k0", "k1", "k2"), { nil: null }),
-      cls: fc.constantFrom("alpha", "beta"),
-      title: fc.option(fc.constantFrom("t1", "t2"), { nil: null }),
-      text: fc.string({ maxLength: 2 }),
-    }),
-    fc.record({ kind: fc.constant("text" as const), text: fc.string({ maxLength: 2 }) }),
-    fc.record({ kind: fc.constant("comment" as const), text: fc.string({ maxLength: 2 }) }),
-  ),
-  { maxLength: 8 },
+const mixedSpecArb = fc.oneof(
+  fc.record({
+    kind: fc.constant("el" as const),
+    tag: fc.constantFrom("div", "span", "p"),
+    key: fc.option(fc.constantFrom("k0", "k1", "k2"), { nil: null }),
+    cls: fc.constantFrom("alpha", "beta"),
+    title: fc.option(fc.constantFrom("t1", "t2"), { nil: null }),
+    text: fc.string({ maxLength: 2 }),
+  }),
+  fc.record({ kind: fc.constant("text" as const), text: fc.string({ maxLength: 2 }) }),
+  fc.record({ kind: fc.constant("comment" as const), text: fc.string({ maxLength: 2 }) }),
 );
+
+const mixedListArb = fc.array(mixedSpecArb, { maxLength: 8 });
+
+// An entry in the NEW list is either a node built fresh from a spec or one of the
+// parent's OWN current children, named by its index.
+//
+// Why this exists: every generator above builds its new list entirely from fresh
+// nodes, so the whole overlap family — the caller handing back nodes it already
+// has — sits outside their range, and the from-scratch oracle above ran 100 times
+// per suite without ever being able to see the wrong tree a same-tag reorder
+// produced. A property that cannot reach a defect class is a gap, not a test.
+type NewEntry = { kind: "fresh"; spec: MixedSpec } | { kind: "reuse"; index: number };
+
+const overlapCaseArb = mixedListArb.chain((oldSpecs) => {
+  const freshEntry = mixedSpecArb.map((spec): NewEntry => ({ kind: "fresh", spec }));
+  const entry =
+    oldSpecs.length === 0
+      ? freshEntry
+      : fc.oneof(
+          freshEntry,
+          fc.nat({ max: oldSpecs.length - 1 }).map((index): NewEntry => ({ kind: "reuse", index })),
+        );
+  return fc.array(entry, { maxLength: 8 }).map((entries) => ({
+    oldSpecs,
+    // A tree cannot hold one node in two places, so naming the same child twice
+    // is not a list any caller can express; keep the first mention. (What the
+    // reconciler does with a repeated node is pinned by example in
+    // reconcile-tree.identity.test.ts, against the platform's own answer.)
+    newEntries: entries.filter(
+      ((seen: Set<number>) => (e: NewEntry) => {
+        if (e.kind === "fresh") {
+          return true;
+        }
+        if (seen.has(e.index)) {
+          return false;
+        }
+        seen.add(e.index);
+        return true;
+      })(new Set<number>()),
+    ),
+  }));
+});
 
 function toMixedNode(s: MixedSpec): Node {
   if (s.kind === "text") {
@@ -125,8 +164,8 @@ interface NodeShape {
 // Attribute PAIRS, sorted: a node reused by key keeps its original attribute
 // order while a fresh one appends in spec order, and that ordering is not part
 // of the contract — the attribute set is.
-function nodeShapes(parent: Node): NodeShape[] {
-  return Array.from(parent.childNodes).map((c) => ({
+function nodeShape(c: Node): NodeShape {
+  return {
     type: c.nodeType,
     name: c.nodeName,
     attrs:
@@ -136,7 +175,11 @@ function nodeShapes(parent: Node): NodeShape[] {
             .sort()
         : [],
     text: c.textContent,
-  }));
+  };
+}
+
+function nodeShapes(parent: Node): NodeShape[] {
+  return Array.from(parent.childNodes).map(nodeShape);
 }
 
 interface AttrSpec {
@@ -188,6 +231,69 @@ describe("reconcileChildren: property — equivalence with a from-scratch build"
         const fresh = document.createElement("div");
         fresh.append(...newSpecs.map(toMixedNode));
         expect(nodeShapes(parent)).toEqual(nodeShapes(fresh));
+      }),
+    );
+  });
+
+  // The same oracle over the WIDER range: the new list may name the parent's own
+  // current children as well as fresh ones. This is the range that reaches the
+  // overlap family, and it subsumes the all-fresh case above (an `newEntries`
+  // draw can be entirely fresh entries).
+  it("leaves the same DOM as a from-scratch build when the new list names the parent's own children", () => {
+    fc.assert(
+      fc.property(overlapCaseArb, ({ oldSpecs, newEntries }) => {
+        const parent = document.createElement("div");
+        const oldNodes = oldSpecs.map(toMixedNode);
+        parent.append(...oldNodes);
+
+        reconcileChildren(
+          parent,
+          newEntries.map((e) =>
+            e.kind === "reuse" ? (oldNodes[e.index] as Node) : toMixedNode(e.spec),
+          ),
+        );
+
+        // The oracle builds the SAME LIST into an empty parent: a named entry
+        // contributes the shape of the child it names, a fresh entry its own.
+        const fresh = document.createElement("div");
+        fresh.append(
+          ...newEntries.map((e) =>
+            toMixedNode(e.kind === "reuse" ? (oldSpecs[e.index] as MixedSpec) : e.spec),
+          ),
+        );
+        expect(nodeShapes(parent)).toEqual(nodeShapes(fresh));
+      }),
+    );
+  });
+
+  // The contract's clause the oracle cannot express: a node the caller handed
+  // back arrives at the index it was passed at, as the same object, carrying its
+  // own content. Structural equivalence alone is satisfied by a reconciler that
+  // copies the right shapes into the wrong nodes — which is exactly what the
+  // positional model did.
+  it("seats every named node at its requested index, as itself and unmodified", () => {
+    fc.assert(
+      fc.property(overlapCaseArb, ({ oldSpecs, newEntries }) => {
+        const parent = document.createElement("div");
+        const oldNodes = oldSpecs.map(toMixedNode);
+        parent.append(...oldNodes);
+        const before = oldNodes.map(nodeShape);
+
+        reconcileChildren(
+          parent,
+          newEntries.map((e) =>
+            e.kind === "reuse" ? (oldNodes[e.index] as Node) : toMixedNode(e.spec),
+          ),
+        );
+
+        newEntries.forEach((e, i) => {
+          if (e.kind !== "reuse") {
+            return;
+          }
+          const node = oldNodes[e.index] as Node;
+          expect(parent.childNodes[i]).toBe(node);
+          expect(nodeShape(node)).toEqual(before[e.index]);
+        });
       }),
     );
   });

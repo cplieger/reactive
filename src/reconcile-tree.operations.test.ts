@@ -9,8 +9,9 @@
 // permanent ownership of that state away from the content attribute (the DOM's
 // dirty-value / dirty-checkedness / dirtiness flags). All of that is invisible
 // in the resulting tree, so these tests observe the operations instead: a spy on
-// the parent's insertBefore, a MutationObserver's records, and — for the
-// unreflected properties — the attribute-reflection the flags switch off.
+// the parent's insertBefore (two of them, each declared at its site), a
+// MutationObserver's records, and — for the unreflected properties — the
+// attribute-reflection the flags switch off.
 //
 // The last case is the mirror image: `patch` must reconcile the handlers it was
 // told about via trackHandler and leave every other property alone, including a
@@ -45,6 +46,26 @@ describe("patch: an unchanged re-patch does no DOM work", () => {
     // in a browser each re-insert costs the node its focus and its selection.
     expect(moves).not.toHaveBeenCalled();
     expect(Array.from(parent.children)).toEqual(reused);
+    moves.mockRestore();
+  });
+
+  it("moves no node when the caller hands back its own children in the same order", () => {
+    // The operations-level statement of what identity matching buys. Handing a
+    // parent its own children unchanged is what a re-render after a no-op state
+    // change looks like; every node is already seated, so nothing may be touched.
+    // Second spy, declared: `insertBefore(node, node)` emits no MutationObserver
+    // record under happy-dom and preserves focus, so there is no behavioural
+    // instrument for "it did not move a node that was already in place".
+    const parent = host();
+    patch(parent, el("div", null, "A"), el("div", null, "B"), el("div", null, "C"));
+    const own = Array.from(parent.childNodes);
+    expect(own).toHaveLength(3);
+
+    const moves = vi.spyOn(parent, "insertBefore");
+    patch(parent, ...own);
+
+    expect(moves).not.toHaveBeenCalled();
+    expect(Array.from(parent.childNodes)).toEqual(own);
     moves.mockRestore();
   });
 
@@ -239,10 +260,13 @@ describe("patch: reconciling a parent against a child it already has", () => {
     patch(parent, button);
     expect(parent.firstElementChild).toBe(button);
 
-    // Re-rendering with the very node already in place. The old node and the new
-    // node are the same element, so they share one tracked-key set: clearing a
-    // key before copying it would clear the handler it is about to copy back
-    // from itself.
+    // Re-rendering with the very node already in place. The caller handed back a
+    // node this parent already has, so it is its own match: it is seated where it
+    // already sits and never reconciled against itself, which is why its tracked
+    // handler cannot be cleared by a pass that would then copy it back from
+    // itself. (Before identity matching this went through patchAttrs with
+    // oldEl === newEl sharing one tracked-key set, and the guard on the clearing
+    // loop was what saved it.)
     patch(parent, button);
     patch(parent, button);
 

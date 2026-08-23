@@ -1,8 +1,19 @@
 // Structural tree-diff: reconcile a parent's children against new nodes.
 // Handles attribute patching, text node updates, element reordering,
-// and recursive child reconciliation. Keying: a specific `*-id` attribute
-// wins over the generic `data-col`; duplicate-key siblings match in
-// document order.
+// and recursive child reconciliation.
+//
+// Correspondence between a child the parent HAS and a child the caller ASKED
+// for is decided in one order, strongest notion of "the same child" first:
+//
+//   1. the same NODE   — the caller handed back a node already in this parent
+//   2. the same KEY    — a specific `*-id` attribute wins over the generic
+//                        `data-col`; siblings sharing a key queue in document
+//                        order, so they pair first-with-first
+//   3. the same POSITION — the next unclaimed unkeyed child
+//
+// Position is last because it is the only one that is not really identity. It
+// is the fallback for a caller that supplies no keys, and every child is
+// claimed at most once so the three tiers cannot disagree about a node.
 
 const handlerKeysMap = new WeakMap<HTMLElement, Set<string>>();
 
@@ -16,7 +27,25 @@ export function trackHandler(el: HTMLElement, key: string): void {
   keys.add(key);
 }
 
-/** Replace a parent's children with the given nodes/strings, reconciling against existing DOM. */
+/** Replace a parent's children with the given nodes/strings, reconciling against existing DOM.
+ *
+ * Strings become text nodes, a `DocumentFragment` contributes its children,
+ * and `null`/`undefined` are skipped. Afterwards `parent`'s children are
+ * exactly what was passed, in order, with existing children reused wherever
+ * one corresponds to a requested child — so focus, selection, scroll position
+ * and live input state survive a re-render.
+ *
+ * Two things a caller has to know:
+ *
+ * - **A node that is already a child of `parent` is placed at the index it was
+ *   passed at, unmodified.** Handing a parent its own children reordered is a
+ *   supported operation (a drag-and-drop, a sort).
+ * - **Any other node is a TEMPLATE.** Its tag, attributes and content may be
+ *   copied into a reused child and the node itself never inserted, so a
+ *   reference to a freshly built node is not a reference to something in the
+ *   DOM. This is what reuse costs, and it is why the point above is worth
+ *   stating separately.
+ */
 export function patch(
   parent: Node,
   ...children: (string | Node | DocumentFragment | null | undefined)[]
@@ -37,114 +66,125 @@ export function patch(
   reconcileChildren(parent, newChildren);
 }
 
-/** Reconcile a parent node's children against a new set of child nodes, patching in place. */
+/** Reconcile a parent node's children against a new set of child nodes, patching in place.
+ *
+ * @internal Not on the package's `exports` map. `patch(parent, ...nodes)` is
+ * the same call for a `Node[]`, with string, fragment and nullish handling on
+ * top.
+ */
 export function reconcileChildren(parent: Node, newChildren: Node[]): void {
-  const oldChildren = Array.from(parent.childNodes);
-  // Per-key FIFO queues: siblings sharing a key (e.g. two `data-col="meta"`
-  // cells in one row) match in document order (first↔first, second↔second)
-  // instead of a last-wins map entry mispairing them and churning nodes.
-  const oldByKey = new Map<string, Node[]>();
-  for (const child of oldChildren) {
-    const key = nodeKey(child);
+  // A node the caller NAMED is reserved for itself. This is the one fact that
+  // keeps the three tiers disjoint: a node already in this parent is seated as
+  // itself (tier 1), so tiers 2 and 3 must never hand it to a different child.
+  // Without the reservation a node can be claimed twice, and the second claim
+  // either removes it as a tag mismatch or patches another child's content into
+  // it — which also means reading out of a live sibling this loop has already
+  // mutated.
+  const named = new Set<Node>(newChildren);
+
+  // Partition the current children ONCE, before any mutation, by the tier
+  // allowed to claim them: a keyed child only ever through its key's FIFO queue,
+  // an unkeyed one only ever through the positional cursor. Nothing is in both,
+  // so tiers 2 and 3 cannot collide, and neither can yield a node twice — a
+  // queue consumes by shift, the cursor only moves forward.
+  const byKey = new Map<string, Node[]>();
+  const positional: Node[] = [];
+  for (let node = parent.firstChild; node !== null; node = node.nextSibling) {
+    const key = nodeKey(node);
     if (key) {
-      const queue = oldByKey.get(key);
+      const queue = byKey.get(key);
       if (queue === undefined) {
-        oldByKey.set(key, [child]);
+        byKey.set(key, [node]);
       } else {
-        queue.push(child);
-      }
-    }
-  }
-
-  let oldIdx = 0;
-  // Old nodes already placed as the resolved child for an earlier index. The
-  // keyed path cannot hand one back — each key is consumed from its FIFO queue —
-  // but `oldChildren` is a SNAPSHOT taken before the loop, so a node still
-  // occupying its original slot there can be handed back by the positional scan
-  // after it has been placed. That happens when the caller re-renders a parent
-  // with its own current children reordered (drag-and-drop, sort): a match on an
-  // already-placed node either removes it as a tag mismatch or patches over it
-  // as a tag match, and either way a child the caller asked for is lost.
-  const placed = new Set<Node>();
-  for (let i = 0; i < newChildren.length; i++) {
-    const newChild = newChildren[i];
-    if (newChild === undefined) {
-      continue;
-    }
-    const newKey = nodeKey(newChild);
-
-    let matched: Node | null = null;
-    if (newKey) {
-      const queue = oldByKey.get(newKey);
-      if (queue !== undefined) {
-        matched = queue.shift() ?? null;
-        if (queue.length === 0) {
-          oldByKey.delete(newKey);
-        }
+        queue.push(node);
       }
     } else {
-      // Unkeyed new node: match the next UNKEYED old node by position, advancing
-      // past keyed old nodes (which are reserved for key-based matching) and any
-      // already-consumed slots. This mirrors the documented contract ("unkeyed
-      // nodes match by position, skipping keyed nodes") and React/Preact's
-      // keyed+positional reconciliation. Stopping at (and matching) a keyed old
-      // node would corrupt a node that key-matching also reuses in the same pass.
-      while (oldIdx < oldChildren.length) {
-        const oc = oldChildren[oldIdx];
-        if (oc !== undefined && !nodeKey(oc) && !placed.has(oc)) {
-          break;
-        }
-        oldIdx++;
-      }
-      if (oldIdx < oldChildren.length) {
-        matched = oldChildren[oldIdx] ?? null;
-        oldIdx++;
-      }
-    }
-
-    if (!matched) {
-      const ref = parent.childNodes.item(i);
-      parent.insertBefore(newChild, ref);
-      continue;
-    }
-
-    if (!canPatch(matched, newChild)) {
-      // Insert the replacement at the target index i, then drop the mismatched
-      // old node — which may NOT be at index i. The positional scan lets an
-      // unkeyed new node match a positionally-later unkeyed old node while an
-      // unconsumed keyed old node sits ahead of it, so `matched` can be at a
-      // position > i. replaceChild would leave newChild at matched's position;
-      // a later insert then pushes it past newChildren.length and the trailing
-      // removal loop deletes it, dropping the new node and leaving the stale
-      // keyed node. The insert and patch branches already target index i.
-      const ref = parent.childNodes.item(i);
-      parent.insertBefore(newChild, ref);
-      placed.add(newChild);
-      parent.removeChild(matched);
-      continue;
-    }
-
-    const ref = parent.childNodes.item(i);
-    if (ref !== matched) {
-      parent.insertBefore(matched, ref);
-    }
-
-    if (matched.nodeType === 3) {
-      if (matched.textContent !== newChild.textContent) {
-        matched.textContent = newChild.textContent;
-      }
-    } else if (matched.nodeType === 1) {
-      patchAttrs(matched as HTMLElement, newChild as HTMLElement);
-      reconcileChildren(matched, Array.from(newChild.childNodes));
+      positional.push(node);
     }
   }
 
-  while (parent.childNodes.length > newChildren.length) {
-    const last = parent.lastChild;
-    if (last === null) {
-      break;
+  // The node currently at the index being resolved. Every branch below seats the
+  // resolved child at exactly that index, so the children before it are final
+  // and the next reference node is the seated child's next sibling — O(1), where
+  // a childNodes.item(i) lookup per step is not. That invariant is also what
+  // makes the sweep at the end of the loop exact.
+  let ref: Node | null = parent.firstChild;
+  let cursor = 0;
+
+  for (const newChild of newChildren) {
+    // Tier 1 — the same NODE. A child the caller handed back needs no lookup and
+    // no reconciliation: it already IS the requested child, so it falls straight
+    // through to being seated as itself below. Short-circuiting the other two
+    // tiers is what stops a sibling being claimed as its host — with duplicate
+    // keys, the key queue would otherwise skip the reserved node, reach the next
+    // one, find it patchable on the shared tag, and let the sweep delete the node
+    // the caller actually named.
+    let matched: Node | null = null;
+    if (newChild.parentNode !== parent) {
+      const key = nodeKey(newChild);
+      if (key) {
+        // Tier 2 — the same KEY.
+        const queue = byKey.get(key);
+        while (queue !== undefined && queue.length > 0) {
+          const candidate = queue.shift();
+          if (candidate !== undefined && !named.has(candidate)) {
+            matched = candidate;
+            break;
+          }
+        }
+      } else {
+        // Tier 3 — the same POSITION.
+        while (cursor < positional.length) {
+          const candidate = positional[cursor++];
+          if (candidate !== undefined && !named.has(candidate)) {
+            matched = candidate;
+            break;
+          }
+        }
+      }
     }
-    last.remove();
+
+    if (matched !== null && canPatch(matched, newChild)) {
+      // An existing child hosts this one: seat it, then patch it to match. The
+      // requested node is a template and is not inserted.
+      //
+      // Re-inserting a node that is already in place still detaches and
+      // reattaches it, which blurs a focused input and drops a text selection
+      // inside it, so move only when the position actually differs.
+      if (ref !== matched) {
+        parent.insertBefore(matched, ref);
+      }
+      if (matched.nodeType === 3) {
+        if (matched.textContent !== newChild.textContent) {
+          matched.textContent = newChild.textContent;
+        }
+      } else if (matched.nodeType === 1) {
+        patchAttrs(matched as HTMLElement, newChild as HTMLElement);
+        reconcileChildren(matched, Array.from(newChild.childNodes));
+      }
+      ref = matched.nextSibling;
+    } else {
+      // Nothing to reconcile: either the caller handed back a node this parent
+      // already has, or nothing corresponds to it, or the tags disagree. Either
+      // way the requested node itself is seated here. A child that was matched
+      // but not patchable is NOT removed at this point — it now sits at or after
+      // `ref`, was consumed so no later index can claim it, and the sweep below
+      // takes it. One removal path, not two.
+      if (ref !== newChild) {
+        parent.insertBefore(newChild, ref);
+      }
+      ref = newChild.nextSibling;
+    }
+  }
+
+  // Everything from `ref` on is a child the caller did not ask for. The
+  // invariant above makes that exact where comparing counts cannot be: pass one
+  // node twice and the requested count exceeds what a tree can hold, leaving a
+  // stale sibling behind.
+  while (ref !== null) {
+    const next = ref.nextSibling;
+    parent.removeChild(ref);
+    ref = next;
   }
 }
 
@@ -221,11 +261,13 @@ function patchAttrs(oldEl: HTMLElement, newEl: HTMLElement): void {
   // canPatch has already established that both nodes share a nodeName, so one
   // side decides the branch.
   //
-  // Each `!==` guard is deliberate and no test here can pin it: assigning the
-  // same string to `.value` is a no-op through the DOM, but in a real browser it
-  // sets the dirty flag and moves the caret to the end, so an unconditional write
-  // would jump the caret on every re-render even when nothing changed. happy-dom
-  // exposes no caret, hence a permanently surviving `-> if (true)` mutant on each.
+  // Each `!==` guard is deliberate: assigning the same string to `.value` is a
+  // no-op through the DOM, but in a real browser it sets the dirty flag and moves
+  // the caret to the end, so an unconditional write would jump the caret on every
+  // re-render even when nothing changed. happy-dom 20.11.6 models the dirty-value,
+  // dirty-checkedness and dirtiness flags, so "the re-patch did not write" is
+  // observable as "the element still follows its content attribute" — all four
+  // guards are pinned behaviourally, with no spy and no caret.
   if (oldEl.nodeName === "INPUT") {
     const oldInput = oldEl as HTMLInputElement;
     const newInput = newEl as HTMLInputElement;
