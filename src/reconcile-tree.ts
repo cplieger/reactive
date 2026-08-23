@@ -57,6 +57,15 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
   }
 
   let oldIdx = 0;
+  // Old nodes already placed as the resolved child for an earlier index. The
+  // keyed path cannot hand one back — each key is consumed from its FIFO queue —
+  // but `oldChildren` is a SNAPSHOT taken before the loop, so a node still
+  // occupying its original slot there can be handed back by the positional scan
+  // after it has been placed. That happens when the caller re-renders a parent
+  // with its own current children reordered (drag-and-drop, sort): a match on an
+  // already-placed node either removes it as a tag mismatch or patches over it
+  // as a tag match, and either way a child the caller asked for is lost.
+  const placed = new Set<Node>();
   for (let i = 0; i < newChildren.length; i++) {
     const newChild = newChildren[i];
     if (newChild === undefined) {
@@ -82,7 +91,7 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
       // node would corrupt a node that key-matching also reuses in the same pass.
       while (oldIdx < oldChildren.length) {
         const oc = oldChildren[oldIdx];
-        if (oc !== undefined && !nodeKey(oc)) {
+        if (oc !== undefined && !nodeKey(oc) && !placed.has(oc)) {
           break;
         }
         oldIdx++;
@@ -110,6 +119,7 @@ export function reconcileChildren(parent: Node, newChildren: Node[]): void {
       // keyed node. The insert and patch branches already target index i.
       const ref = parent.childNodes.item(i);
       parent.insertBefore(newChild, ref);
+      placed.add(newChild);
       parent.removeChild(matched);
       continue;
     }

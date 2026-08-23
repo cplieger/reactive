@@ -450,6 +450,108 @@ describe("reconcileChildren: !canPatch on a positionally-displaced match (cycle-
   });
 });
 
+describe("reconcileChildren: a new child list that overlaps the parent's own children", () => {
+  // Re-rendering a parent with its OWN current children reordered — a drag-and-drop
+  // or a sort, where the caller hands back the nodes it already has — is the shape
+  // the positional scan gets wrong. `oldChildren` is a snapshot taken before the
+  // loop, so a node already placed as the resolved child for an earlier index is
+  // still sitting in the snapshot at its original slot and can be handed back as
+  // the positional match for a later index. Both things the loop then does with a
+  // match lose a child the caller asked for: a tag mismatch removes it, and a tag
+  // MATCH patches over it and never inserts the node that was actually requested.
+  // The keyed path is immune because each key is consumed from a FIFO queue.
+
+  it("keeps both children when its own two are swapped: [p, span] -> [span, p]", () => {
+    const parent = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "P";
+    const span = document.createElement("span");
+    span.textContent = "S";
+    parent.append(p, span);
+
+    reconcileChildren(parent, [span, p]);
+
+    expect(parent.childNodes.length).toBe(2);
+    expect(parent.childNodes[0]).toBe(span);
+    expect(parent.childNodes[1]).toBe(p);
+    expect(parent.textContent).toBe("SP");
+  });
+
+  it("keeps both children through patch() when an element and a text node swap", () => {
+    const parent = document.createElement("div");
+    const button = document.createElement("button");
+    button.textContent = "B";
+    const text = document.createTextNode("T");
+    parent.append(button, text);
+
+    patch(parent, text, button);
+
+    expect(parent.childNodes.length).toBe(2);
+    expect(parent.childNodes[0]).toBe(text);
+    expect(parent.childNodes[1]).toBe(button);
+  });
+
+  it("inserts a fresh sibling that shares a tag with an already-placed own child: [p, span] -> [span, span']", () => {
+    // The witness that the removal is not the whole defect: every removeChild in
+    // this pass is legitimate (the <p> really is unwanted), yet a child is still
+    // lost. The scan hands `span` back at index 1 after it was placed at index 0,
+    // canPatch(span, span') SUCCEEDS on the shared tag, and the branch patches
+    // `span` with the fresh node's content instead of inserting the fresh node.
+    const parent = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "P";
+    const span = document.createElement("span");
+    span.textContent = "S";
+    parent.append(p, span);
+
+    const fresh = document.createElement("span");
+    fresh.textContent = "F";
+    reconcileChildren(parent, [span, fresh]);
+
+    expect(parent.childNodes.length).toBe(2);
+    expect(parent.childNodes[0]).toBe(span);
+    expect(parent.childNodes[0]?.textContent).toBe("S");
+    expect(parent.childNodes[1]?.nodeName).toBe("SPAN");
+    expect(parent.childNodes[1]?.textContent).toBe("F");
+  });
+
+  it("keeps all three children when its own three are reversed: [p, span, b] -> [b, span, p]", () => {
+    const parent = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "P";
+    const span = document.createElement("span");
+    span.textContent = "S";
+    const b = document.createElement("b");
+    b.textContent = "B";
+    parent.append(p, span, b);
+
+    reconcileChildren(parent, [b, span, p]);
+
+    expect(parent.childNodes.length).toBe(3);
+    expect(parent.childNodes[0]).toBe(b);
+    expect(parent.childNodes[1]).toBe(span);
+    expect(parent.childNodes[2]).toBe(p);
+  });
+
+  it("still removes an own child the new list drops: [p, span, b] -> [b, p]", () => {
+    const parent = document.createElement("div");
+    const p = document.createElement("p");
+    p.textContent = "P";
+    const span = document.createElement("span");
+    span.textContent = "S";
+    const b = document.createElement("b");
+    b.textContent = "B";
+    parent.append(p, span, b);
+
+    reconcileChildren(parent, [b, p]);
+
+    expect(parent.childNodes.length).toBe(2);
+    expect(parent.childNodes[0]).toBe(b);
+    expect(parent.childNodes[1]).toBe(p);
+    expect(span.parentNode).toBeNull();
+  });
+});
+
 describe("reconcileChildren: nodeKey precedence and duplicate keys", () => {
   it("a specific *-id attribute wins over a preceding generic data-col", () => {
     // Live pattern: a cell carrying BOTH keys (data-col="badges" +
