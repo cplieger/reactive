@@ -1,6 +1,7 @@
 // Structural tree-diff: patch / reconcileChildren / trackHandler.
 import { describe, it, expect, vi } from "vitest";
-import { el, patch, reconcileChildren, trackHandler } from "./index.js";
+import { el } from "./index.js";
+import { patch, reconcileChildren, trackHandler } from "./reconcile-tree.js";
 
 describe("patch", () => {
   it("patches text content", () => {

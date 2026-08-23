@@ -30,4 +30,4 @@ export { el } from "./el.js";
 export type { AttrValue } from "./el.js";
 export { reconcile, KEY_ATTR } from "./reconcile.js";
 export type { ReconcileSpec } from "./reconcile.js";
-export { patch, reconcileChildren, trackHandler } from "./reconcile-tree.js";
+export { patch, trackHandler } from "./reconcile-tree.js";
