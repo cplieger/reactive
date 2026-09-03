@@ -673,6 +673,37 @@ export function untracked<T>(fn: () => T): T {
   }
 }
 
+/** Read a signal for its tracking effect alone, discarding the value.
+ *
+ *  The complement of `peek()`: `peek` reads without subscribing, `touch`
+ *  subscribes without keeping. Outside a reactive scope it does nothing
+ *  observable.
+ *
+ *  This exists because the two-tier shape `createCollection` and `bindList` are
+ *  built on produces it: a scope reads per-entity values through `signalFor`,
+ *  so it must depend on the structure signal separately to re-run when the id
+ *  set changes, and that dependency has no value the body wants. Spelling it as
+ *  a discarded expression left the intent to a comment, and `undefined` entries
+ *  are accepted so a per-key lookup that may miss (`signalFor(id)`,
+ *  `SignalMap.get(id)`) can be passed straight in.
+ *
+ *  Not a substitute for `on()`, which declares an exhaustive dependency list
+ *  and runs its body untracked. `touch` ADDS a dependency and leaves every
+ *  other read in the scope tracked as usual. */
+export function touch(
+  ...signals: readonly (Signal<unknown> | ReadonlySignal<unknown> | undefined)[]
+): void {
+  for (const sig of signals) {
+    readForDependency(sig);
+  }
+}
+
+// Named so the read is a call rather than a discarded expression: the value is
+// deliberately unused, and returning it is what keeps that legible.
+function readForDependency(sig: Signal<unknown> | ReadonlySignal<unknown> | undefined): unknown {
+  return sig?.value;
+}
+
 /** Subscribe to a signal, calling cb on every change. Returns dispose function.
  *  The callback runs untracked: reading other signals inside it does not add
  *  them as dependencies of the subscription (matches upstream
