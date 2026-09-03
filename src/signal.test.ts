@@ -12,6 +12,7 @@ import {
   isComputed,
   setEffectErrorHandler,
   on,
+  touch,
 } from "./index.js";
 import type { ReadonlySignal } from "./index.js";
 
@@ -576,6 +577,110 @@ describe("untracked", () => {
     expect(spy).not.toHaveBeenCalled();
     a.value = 10;
     expect(spy).toHaveBeenCalledWith(109); // 10 + 99
+  });
+});
+
+describe("touch", () => {
+  it("subscribes the effect to a signal whose value it never uses", () => {
+    const version = signal(0);
+    const spy = vi.fn();
+    effect(() => {
+      touch(version);
+      spy();
+    });
+    spy.mockClear();
+    version.value = 1;
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribes to every signal it is passed", () => {
+    const a = signal(0);
+    const b = signal(0);
+    const spy = vi.fn();
+    effect(() => {
+      touch(a, b);
+      spy();
+    });
+    spy.mockClear();
+    a.value = 1;
+    b.value = 1;
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips undefined, so a per-key lookup that missed can be passed straight in", () => {
+    const present = signal(0);
+    const spy = vi.fn();
+    effect(() => {
+      touch(undefined, present, undefined);
+      spy();
+    });
+    spy.mockClear();
+    present.value = 1;
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it("leaves the rest of the scope tracked, unlike on()", () => {
+    const version = signal(0);
+    const other = signal(1);
+    const spy = vi.fn();
+    effect(() => {
+      touch(version);
+      spy(other.value);
+    });
+    spy.mockClear();
+    other.value = 2;
+    expect(spy).toHaveBeenCalledWith(2);
+  });
+
+  it("tracks a computed's dependency on a collection's structure signal", () => {
+    // The shape that motivates the export: a computed reads per-entity values
+    // but must also re-derive when the id set changes.
+    const ids = signal<readonly string[]>(["a"]);
+    const values = new Map([
+      ["a", signal(1)],
+      ["b", signal(2)],
+    ]);
+    const total = computed(() => {
+      touch(ids);
+      let sum = 0;
+      for (const id of ids.peek()) {
+        sum += values.get(id)?.peek() ?? 0;
+      }
+      return sum;
+    });
+    expect(total.value).toBe(1);
+    ids.value = ["a", "b"];
+    expect(total.value).toBe(3);
+  });
+
+  it("does nothing observable outside a reactive scope", () => {
+    const s = signal(0);
+    expect(() => {
+      touch(s);
+    }).not.toThrow();
+    expect(s.value).toBe(0);
+  });
+
+  it("composes with effect() when the on() body returns undefined", () => {
+    // `effect` requires its callback to return a cleanup or `undefined`, and
+    // that applies to a callback `on()` built as much as to an inline one: an
+    // arrow with no return statement infers `() => void`, which the contract
+    // rejects. Pinned because the requirement is invisible until you compose
+    // the two, and the fix is one word at the end of the body.
+    const version = signal(0);
+    const spy = vi.fn();
+    effect(
+      on(
+        () => version.value,
+        () => {
+          spy();
+          return undefined;
+        },
+      ),
+    );
+    spy.mockClear();
+    version.value = 1;
+    expect(spy).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -5,6 +5,7 @@ export {
   setEffectErrorHandler,
   computed,
   untracked,
+  touch,
   subscribe,
   isSignal,
   isComputed,
