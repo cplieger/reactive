@@ -30,10 +30,31 @@ export function reconcile<T>(
     }
   }
 
-  let target: Node | null = null;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i] as T;
+  // DEPARTING ELEMENTS GO FIRST, before anything is placed. The walk below runs
+  // backwards and skips an element already sitting before the last one it placed; a
+  // departing element still in the tree makes every PREDECESSOR's `nextSibling` point at
+  // a node about to vanish, so the guard sees a mismatch and re-seats a row nothing
+  // changed — which restarts its animations and drops `:hover` and focus. So `onRemove`
+  // fires before the survivors are placed, holding its own intact element; only the
+  // siblings' positions are not yet final. `key` is still called exactly once per item,
+  // and the pairs carry it into the walk so neither loop indexes an array.
+  const pairs: [T, string][] = [];
+  const wanted = new Set<string>();
+  for (const item of items) {
     const k = spec.key(item);
+    pairs.push([item, k]);
+    wanted.add(k);
+  }
+  for (const [k, el] of existing) {
+    if (!wanted.has(k)) {
+      spec.onRemove?.(el, k);
+      el.remove();
+      existing.delete(k);
+    }
+  }
+
+  let target: Node | null = null;
+  for (const [item, k] of pairs.reverse()) {
     let el = existing.get(k);
     if (el === undefined) {
       el = spec.mount(item);
@@ -51,10 +72,5 @@ export function reconcile<T>(
       parent.insertBefore(el, target);
     }
     target = el;
-  }
-
-  for (const [k, el] of existing) {
-    spec.onRemove?.(el, k);
-    el.remove();
   }
 }
