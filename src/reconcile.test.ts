@@ -949,3 +949,142 @@ describe("reconcile: non-element children in the parent", () => {
     expect(parent.childNodes[0]!.nodeType).toBe(3);
   });
 });
+
+// A surviving row must not be re-seated because a later row left.
+//
+// FOCUS is the observable, and identity is not: a re-seat rebuilds the element's
+// rendering while preserving both identity and order, so these cases assert focus
+// first. A real browser is required — a DOM emulator does not blur on a re-seat.
+describe("reconcile does not disturb the rows it kept", () => {
+  const spec: ReconcileSpec<string> = {
+    key: (id) => id,
+    mount: (id) => {
+      const b = document.createElement("button");
+      b.textContent = id;
+      return b;
+    },
+  };
+
+  /** A parent in the DOCUMENT — `focus()` is a no-op on a detached tree, so a case built
+   *  off-document would pass whatever the function did. */
+  function seated(ids: string[]): { parent: HTMLElement; first: HTMLButtonElement } {
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    reconcile(parent, ids, spec);
+    const first = parent.children[0] as HTMLButtonElement;
+    first.focus();
+    expect(document.activeElement).toBe(first);
+    return { parent, first };
+  }
+
+  it("keeps focus on a row when a LATER row is removed", () => {
+    const { parent, first } = seated(["a", "b", "c"]);
+    try {
+      reconcile(parent, ["a", "c"], spec);
+
+      expect(document.activeElement, "the kept row was re-seated").toBe(first);
+      expect(parent.children[0]).toBe(first);
+      expect([...parent.children].map((c) => c.textContent)).toEqual(["a", "c"]);
+    } finally {
+      parent.remove();
+    }
+  });
+
+  it("keeps focus on a row when a LATER row's key CHANGES", () => {
+    const { parent, first } = seated(["a", "b", "c"]);
+    try {
+      // A key change is a removal plus an insertion, so it exercised the same path.
+      reconcile(parent, ["a", "b2", "c"], spec);
+
+      expect(document.activeElement, "the kept row was re-seated").toBe(first);
+      expect([...parent.children].map((c) => c.textContent)).toEqual(["a", "b2", "c"]);
+    } finally {
+      parent.remove();
+    }
+  });
+
+  it("keeps focus when every OTHER row is removed", () => {
+    const { parent, first } = seated(["a", "b", "c", "d"]);
+    try {
+      reconcile(parent, ["a"], spec);
+
+      expect(document.activeElement).toBe(first);
+      expect(parent.children.length).toBe(1);
+    } finally {
+      parent.remove();
+    }
+  });
+
+  // The cases that already held, kept as controls: without them a fix that re-seated
+  // NOTHING — or one that stopped placing rows at all — would look like a pass.
+  it("keeps focus when a row is INSERTED before the tail", () => {
+    const { parent, first } = seated(["a", "c"]);
+    try {
+      reconcile(parent, ["a", "b", "c"], spec);
+
+      expect(document.activeElement).toBe(first);
+      expect([...parent.children].map((c) => c.textContent)).toEqual(["a", "b", "c"]);
+    } finally {
+      parent.remove();
+    }
+  });
+
+  it("keeps focus when nothing about the list moved", () => {
+    const { parent, first } = seated(["a", "b", "c"]);
+    try {
+      reconcile(parent, ["a", "b", "c"], spec);
+
+      expect(document.activeElement).toBe(first);
+    } finally {
+      parent.remove();
+    }
+  });
+
+  // A REORDER genuinely moves rows, so the row that has to travel loses focus and the
+  // one that does not keeps it. Stated so the fix is not read as "focus always survives".
+  it("still moves the row a reorder actually moves", () => {
+    const { parent, first } = seated(["a", "b", "c"]);
+    try {
+      reconcile(parent, ["b", "a", "c"], spec);
+
+      expect([...parent.children].map((c) => c.textContent)).toEqual(["b", "a", "c"]);
+      expect(document.activeElement, "the row that travelled keeps no focus").not.toBe(first);
+    } finally {
+      parent.remove();
+    }
+  });
+
+  // `onRemove` now runs BEFORE the survivors are placed. It is handed its own element,
+  // intact and still in the tree, which is what every consumer reads.
+  it("hands onRemove a live element whose own subtree is intact", () => {
+    const parent = document.createElement("div");
+    document.body.appendChild(parent);
+    const seen: { key: string; connected: boolean; label: string }[] = [];
+    const withChild: ReconcileSpec<string> = {
+      key: (id) => id,
+      mount: (id) => {
+        const row = document.createElement("div");
+        const label = document.createElement("span");
+        label.className = "label";
+        label.textContent = id;
+        row.appendChild(label);
+        return row;
+      },
+      onRemove: (el, key) => {
+        seen.push({
+          key,
+          connected: el.isConnected,
+          label: el.querySelector(".label")?.textContent ?? "",
+        });
+      },
+    };
+    try {
+      reconcile(parent, ["a", "b"], withChild);
+      reconcile(parent, ["a"], withChild);
+
+      expect(seen).toEqual([{ key: "b", connected: true, label: "b" }]);
+    } finally {
+      parent.remove();
+    }
+  });
+});
