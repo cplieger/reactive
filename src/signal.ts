@@ -746,19 +746,27 @@ export function on<T, U>(
   fn: (value: T, prev: T | undefined, prevResult: U | undefined) => U,
   options?: { defer?: false },
 ): () => U;
-// Single accessor, deferred: first call returns undefined.
+/** Single accessor, deferred: the first call returns undefined. A `defer`
+ *  typed as `boolean` selects this overload even when the value is `false`,
+ *  because the type cannot rule the deferred call out; pass a literal
+ *  `false` (or omit `options`) to keep the non-undefined return. */
 export function on<T, U>(
   deps: () => T,
   fn: (value: T, prev: T | undefined, prevResult: U | undefined) => U,
   options: { defer: boolean },
 ): () => U | undefined;
-// Array of accessors, non-deferred (or explicit `{ defer: false }`): never undefined.
+/** Array of accessors, non-deferred (or explicit `{ defer: false }`): never
+ *  undefined. `value` and `prev` are the accessors' results in declaration
+ *  order, typed `unknown[]` — a heterogeneous list is not correlated
+ *  positionally, so narrow each element before use. */
 export function on<U>(
   deps: (() => unknown)[],
   fn: (value: unknown[], prev: unknown[] | undefined, prevResult: U | undefined) => U,
   options?: { defer?: false },
 ): () => U;
-// Array of accessors, deferred: first call returns undefined.
+/** Array of accessors, deferred: the first call returns undefined, having read
+ *  every accessor to seed `prev`. Same `boolean`-widening caveat as the single
+ *  deferred overload. */
 export function on<U>(
   deps: (() => unknown)[],
   fn: (value: unknown[], prev: unknown[] | undefined, prevResult: U | undefined) => U,
