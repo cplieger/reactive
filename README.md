@@ -23,6 +23,8 @@ A standalone reactive app-skeleton:
 
 The store, `SignalMap`, and `Collection` are thin facades over a single signal engine: one reactive core, not several. Zero dependencies beyond the DOM API.
 
+> **What needs a DOM:** the render half, `el`, `bindList`, `reconcile`, `patch` and `trackHandler`. The engine and the state tiers do not: `signal`, `effect`, `computed`, `batch`, `untracked`, `createStore`, `SignalMap`, `createCollection` and `createBus`. Nothing touches the DOM at import time, so importing the package under Node, Deno, Bun or Workers succeeds and only the DOM functions throw when called.
+
 Mirrors semantics from @preact/signals-core and solid-js reactivity.
 
 ## Flush model
