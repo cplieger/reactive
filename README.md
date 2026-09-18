@@ -1,8 +1,6 @@
 # reactive
 
-[![npm](https://img.shields.io/npm/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive)
-[![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive)
-[![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/reactive/badges/mutation-ts.json)](https://github.com/cplieger/reactive/issues?q=label%3Astryker-tracker)
+[![npm](https://img.shields.io/npm/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive) [![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/reactive/badges/mutation-ts.json)](https://github.com/cplieger/reactive/issues?q=label%3Astryker-tracker)
 
 > Signals + collections + DOM-reconciliation micro-framework for TypeScript
 
