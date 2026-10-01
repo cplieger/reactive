@@ -200,7 +200,7 @@ describe("flush model: a write from inside the graph flushes too", () => {
 describe("flush model: deferral beyond a batch belongs to the caller", () => {
   it("flushes inside the caller's own microtask when the write is deferred there", async () => {
     // Clause 3. A consumer wanting effects on a later task defers the WRITE, not
-    // the flush — this is the shape vibekit's message-render coalescer uses.
+    // the flush — this is the shape marotte's message-render coalescer uses.
     const s = signal(0);
     const seen: number[] = [];
     effect(() => {
