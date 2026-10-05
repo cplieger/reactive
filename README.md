@@ -152,7 +152,7 @@ The package leaves these out on purpose. [Non-goals](docs/non-goals.md) gives th
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the conventions and how to run the checks locally.
+Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer
 
