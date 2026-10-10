@@ -682,9 +682,8 @@ export function untracked<T>(fn: () => T): T {
  *  This exists because the two-tier shape `createCollection` and `bindList` are
  *  built on produces it: a scope reads per-entity values through `signalFor`,
  *  so it must depend on the structure signal separately to re-run when the id
- *  set changes, and that dependency has no value the body wants. Spelling it as
- *  a discarded expression left the intent to a comment, and `undefined` entries
- *  are accepted so a per-key lookup that may miss (`signalFor(id)`,
+ *  set changes, and that dependency has no value the body wants. `undefined`
+ *  entries are accepted so a per-key lookup that may miss (`signalFor(id)`,
  *  `SignalMap.get(id)`) can be passed straight in.
  *
  *  Not a substitute for `on()`, which declares an exhaustive dependency list
@@ -698,8 +697,7 @@ export function touch(
   }
 }
 
-// Named so the read is a call rather than a discarded expression: the value is
-// deliberately unused, and returning it is what keeps that legible.
+// deadset:ignore DS1803 -- returning the value keeps the tracking read from being a discarded expression; typescript-eslint rejects void on a property read
 function readForDependency(sig: Signal<unknown> | ReadonlySignal<unknown> | undefined): unknown {
   return sig?.value;
 }

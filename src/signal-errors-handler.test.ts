@@ -535,7 +535,7 @@ describe("exception safety", () => {
     let throwInEquals = false;
     const s = signal(0);
     const c = computed(() => s.value * 2, {
-      equals: (_a, _b) => {
+      equals: () => {
         if (throwInEquals) {
           throw new Error("eq-boom");
         }
