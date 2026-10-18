@@ -1,14 +1,16 @@
 # Signals, stores and collections
 
-This page describes how the state half of reactive behaves, which covers signals, computed values, effects, stores, collections and the event bus. It is for a developer writing effects and stores who needs the exact rules. None of these functions needs a DOM.
+This page describes how the state half of reactive behaves, which covers signals, computed values, effects, owners, resources, stores, collections and the event bus. It is for a developer writing effects and stores who needs the exact rules. None of these functions needs a DOM.
 
 ## The flush model
 
 The whole model has three rules.
 
-- A write flushes. When `sig.value = x` returns, every effect that depends on `sig` has already re-run. The setter notifies and drains before it returns, so a caller never sees a pending effect and there is no queue to drain. Read the DOM on the next statement and you read what the effects wrote.
+- A write flushes. When `sig.value = x` returns, every effect that depends on `sig` has already re-run, except the effects still running, described below. The setter notifies and drains before it returns, so a caller never sees a pending effect and there is no queue to drain. Read the DOM on the next statement and you read what the effects wrote.
 - `batch(fn)` is the only deferral. Inside a batch, writes coalesce and effects are held. They run once, synchronously, when the outermost batch returns. A nested batch defers to its outermost, and a throwing body still flushes.
 - Deferral beyond that is yours. To get effects on a later task, write on a later task, with `queueMicrotask` or `requestAnimationFrame`.
+
+An effect still running when a write lands is never interrupted. That covers the writer and every effect that started it, whether in its body or in the cleanup of its previous run. Each one whose current run had already read the written signal re-runs once that run returns, so a run is never cut in half by its own re-run.
 
 The package has no flush barrier, meaning no `flushSync()` and no `nextTick()`. A barrier is the API a deferred model owes its callers, as with Vue's `nextTick` and React's `flushSync`. This model never holds work, so a barrier would have nothing to report and nothing to force. The same write contract is the one [@preact/signals-core](https://github.com/preactjs/signals/blob/main/packages/core/README.md) documents.
 
@@ -24,9 +26,81 @@ The package has no flush barrier, meaning no `flushSync()` and no `nextTick()`. 
 ## Effects
 
 - `effect(fn)` runs `fn` at once and again whenever a signal it read changes. It returns a function that disposes the effect.
-- `fn` returns `undefined` or a cleanup function. The cleanup runs before the next run and when the effect is disposed.
+- `fn` returns `undefined` or a cleanup function. The cleanup runs before the next run and when the effect is disposed. A run that disposes its own effect, or the root holding it, has its cleanup run as soon as it returns.
 - An effect that throws does not stop the other effects. The error goes to the handler set with `setEffectErrorHandler(handler)`, which returns the previous handler. The default handler calls `console.error`.
 - Effects that keep writing the signals they depend on stop after 100 passes with `Error("Cycle detected")`, rather than looping forever.
+
+## Owners
+
+An owner disposes a tree of effects at once, such as everything a page or a dialog started. Outside any owner nothing changes, and each effect is independent and lives until you call its dispose function.
+
+- `createRoot(fn)` runs `fn(dispose, owner)` in a new owner and returns what `fn` returns. Effects and roots created while it runs belong to the owner. A root created inside another owner is a child of it. If `fn` throws, the root is disposed and the error rethrown.
+- An effect created under an owner belongs to it, and each run of the effect owns the effects and roots that run creates. They are disposed before the next run, so a parent effect that re-runs 100 times leaves one live child, not 100.
+- `owner.signal` is an `AbortSignal` that aborts when the owner is disposed. Pass it to `fetch` or `addEventListener` so a disposed view stops its requests and listeners.
+- `owner.onDispose(fn)` registers a callback for disposal.
+- `runWithOwner(owner, fn)` runs `fn` with `owner` current, for an event handler or a continuation that creates effects later. Once the owner is being disposed or is disposed, it returns `undefined` without calling `fn`, so a handler queued by a closed view does nothing.
+- Disposal has a fixed order. The owner is marked as being disposed, then its children are disposed newest first, then its callbacks run newest first, then `signal` aborts and the owner is closed. A callback or effect cleanup that throws goes to the effect error handler, and the rest of the disposal still runs.
+- While an owner is being disposed, creating an effect, a root or a resource under it throws, and `onDispose` runs its callback at once. A write made by a cleanup during disposal re-runs no effect of the owner being disposed.
+- `createRoot`, `runWithOwner` and disposal callbacks run untracked. A computed's function runs with no owner, because a computed runs whenever it is read.
+- The current owner is not exported. Get an owner from `createRoot`'s callback or a `bindList` row.
+
+```typescript
+import { createRoot, effect, runWithOwner, signal } from "@cplieger/reactive";
+
+const route = signal("/library");
+
+const disposeApp = createRoot((dispose, owner) => {
+  effect(() => {
+    const path = route.value;
+    // Owned by this run: disposed when the route changes.
+    effect(() => {
+      document.title = path;
+    });
+  });
+  document.addEventListener(
+    "keydown",
+    () => {
+      // A root created here belongs to the app's owner; this one ends at once.
+      runWithOwner(owner, () =>
+        createRoot((done) => {
+          effect(() => console.log(route.value));
+          done();
+        }),
+      );
+    },
+    { signal: owner.signal },
+  );
+  return dispose;
+});
+
+disposeApp(); // every effect stops, and the listener given owner.signal is removed
+```
+
+## Resources
+
+`resource(source, load, options?)` loads async data for the current value of `source`. It needs an owner and throws when created outside one, or under one being disposed.
+
+- `source()` is tracked. `load(value, signal)` runs at once and again whenever `source` produces a new value. A value equal to the previous one under `options.equals`, `Object.is` by default, starts no new run. A throw from `source` goes to the effect error handler and starts no run.
+- Each run has its own owner. Its `signal` is the one passed to `load`, and it is current while `load` runs, untracked. A new source value, `refetch()` or the resource's owner being disposed disposes the previous run, which aborts its signal. A disposed run writes nothing when its promise settles later, so a late answer never overwrites a newer one.
+- The resource is a read-only signal of a `Loadable<T, E>`: `{ state: "loading", stale? }`, `{ state: "ready", data }` or `{ state: "error", error, stale? }`. `stale` is the last ready value, kept while a later run loads and after it fails, so a failure never reads as empty. `E` is whatever `load` throws or rejects with.
+- `refetch()` starts a new run for the current source value, and does nothing once the owner is being disposed.
+
+```typescript
+import { createRoot, effect, resource, signal } from "@cplieger/reactive";
+
+const id = signal("a");
+
+createRoot(() => {
+  const item = resource(
+    () => id.value,
+    (value, signal) => fetch(`/items/${value}`, { signal }).then((res) => res.text()),
+  );
+  effect(() => {
+    const s = item.value;
+    console.log(s.state === "ready" ? s.data : s.state);
+  });
+});
+```
 
 ## Reading without tracking
 
@@ -97,12 +171,13 @@ The store has no `effect` or `batch` member. A store member exists only where it
 - `get(id)` returns the signal for `id`, or `undefined` when none exists yet.
 - `ensure(id, initial)` returns the signal for `id` and creates it with `initial` on first use.
 - `clear(id)` drops one signal, and `clearAll()` drops every signal.
+- `new SignalMap<V>({ equals })` gives every signal it creates that equality, so a write of an equal value notifies nothing. It is `Object.is` when omitted.
 
 ## Collections
 
-`createCollection<T>(keyOf)` returns an ordered collection of keyed items. It is the data half of a two-tier list. Each item has its own signal, and one more signal, `ids`, holds the order. An update to one item notifies only that item's readers. Adding, removing or reordering items changes `ids`. It is built on `signal` and `SignalMap`.
+`createCollection<T>(keyOf, options?)` returns an ordered collection of keyed items. It is the data half of a two-tier list. Each item has its own signal, and one more signal, `ids`, holds the order. An update to one item notifies only that item's readers. Adding, removing or reordering items changes `ids`. It is built on `signal` and `SignalMap`.
 
-- `setAll(items)` replaces everything in one batch. A replacement in the same order does not change `ids`. Repeated keys collapse to one item, where the first occurrence keeps its position and the last value wins.
+- `setAll(items)` replaces everything in one batch. A replacement in the same order does not change `ids`. Repeated keys collapse to one item. The first occurrence keeps its position, and a later value replaces the held one only when `options.equals` reports a change.
 - `upsert(item)` adds or replaces one item, and a new id goes to the end.
 - `prepend(items)` adds new items to the front, for loading older items on scroll-up. An id already present is updated where it is.
 - `update(id, next)` replaces one item with a value or with the result of an updater function, and does nothing when the id is absent. `remove(id)` removes one item, and `clear()` removes all of them.
@@ -110,6 +185,7 @@ The store has no `effect` or `batch` member. A store member exists only where it
 - `signalFor(id)` returns the item's signal, or `undefined`, for a scope that should react to that item only.
 - `ids` is the order signal. It changes on add, remove and reorder only.
 - `items()` returns the values in order, and reading it in an effect tracks the order and every item.
+- `options.equals(a, b)` decides when a write of an item is a change. `setAll`, `upsert`, `prepend` and `update` with an item equal to the current one notify nothing and keep the current value. It is `Object.is` when omitted.
 
 `bindList` renders a collection. [Building and updating the DOM](dom.md#binding-a-list-source-with-bindlist) describes it.
 

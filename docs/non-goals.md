@@ -2,14 +2,14 @@
 
 This page lists what reactive leaves out on purpose, with the reason for each. It is for a developer deciding whether the package fits, or about to propose one of these as a feature.
 
-- An effect ownership tree, or `createRoot`. You manage disposal yourself, and ownership would change the mental model.
-- Automatic disposal of nested effects. Each effect is independent and returns its own dispose function, so compose them with arrays or helper functions.
+- Ownership outside a root. An effect created with no owner is independent and lives until its dispose function is called, so code that never calls `createRoot` keeps the plain model.
+- A public `getOwner()`. The current owner stays private, so an owner is always one a caller was handed by `createRoot` or `bindList`.
 - Lazy activation, or an `onMount` lifecycle. Signals are always active, and managing resources is the caller's job.
 - `Signal.subtle.Watcher`, or notify-on-dirty. This package is the framework layer, and a watcher is for frameworks built on a bare signals primitive.
 - Introspection APIs. They are a developer-tools concern and are not needed in production.
 - Explicit disposal of a computed. A computed is garbage-collected once nothing references it.
 - Server-side rendering, or per-request isolation. This is a client-side library. On a server, create a fresh signal graph per request.
-- Async signals and resources. Load async data with an effect and plain signal writes.
+- Suspense, or a resource that throws while loading. `resource` reports loading and failure as values in its `Loadable`, and the view decides what to show.
 - Transactions. They are a framework-level concern, not a signals primitive.
 - A custom scheduler, or `setScheduler()`. A write flushes before it returns and `batch` is synchronous, so there is no queue to schedule. To defer, write on a later task.
 - A flush barrier, such as `flushSync` or `nextTick`. A barrier is what a deferred model owes its callers. This model never holds work, so a barrier would have nothing to report.

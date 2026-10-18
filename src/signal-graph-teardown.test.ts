@@ -1,15 +1,10 @@
-// Reactive signal core — what teardown must not take with it.
-//
-// A signal's subscribers live in a doubly-linked list whose HEAD is the only
-// entry point (`_targets`); every unlink therefore has two branches, and the
-// head branch is the one no later walk can repair, because the `_prevTarget`
-// pointers a later unlink trusts were rewritten when the head went away. Get
-// either branch wrong and an unrelated effect that merely shares a signal with
-// the one being torn down goes quiet — no error, no second chance, and only
-// after a specific order of subscribe / dispose / drop.
-//
-// The same applies to the DISPOSED flag: once an effect has torn itself down,
-// every later call on it has to be inert.
+// What teardown must not take with it. A signal's subscribers are a doubly
+// linked list entered only at its head (`_targets`), so every unlink has two
+// branches, and a wrong head branch cannot be repaired by a later walk: the
+// `_prevTarget` pointers it trusts were rewritten. Either mistake silences an
+// unrelated effect sharing the signal, with no error, after a specific order
+// of subscribe, dispose and drop. Likewise, every call on a DISPOSED effect
+// must be inert.
 import { describe, it, expect } from "vitest";
 import { effect, signal } from "./index.js";
 
@@ -114,16 +109,14 @@ describe("an effect that disposes itself from its own body", () => {
 
     s.value = 1; // re-runs (cleanup for run 0), then disposes itself mid-body
     expect(runs).toEqual([0, 1]);
-    expect(cleanups).toEqual([0]);
+    // The cleanup the self-disposing run returned runs as soon as the run ends.
+    expect(cleanups).toEqual([0, 1]);
 
-    // The self-disposing run still returned a cleanup, which the effect stored
-    // after tearing itself down. Disposal already happened, so nothing may run
-    // it — and no later write may wake the effect either.
     s.value = 2;
     dispose();
     dispose();
 
     expect(runs).toEqual([0, 1]);
-    expect(cleanups).toEqual([0]);
+    expect(cleanups).toEqual([0, 1]);
   });
 });
