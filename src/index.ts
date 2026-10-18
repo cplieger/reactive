@@ -10,14 +10,19 @@ export {
   isSignal,
   isComputed,
   on,
+  createRoot,
+  runWithOwner,
 } from "./signal.js";
 export type {
   Signal,
   Cleanup,
   EffectErrorHandler,
+  Owner,
   ReadonlySignal,
   SignalOptions,
 } from "./signal.js";
+export { resource } from "./resource.js";
+export type { Loadable, Resource, ResourceOptions } from "./resource.js";
 export { createStore } from "./store.js";
 export type { Store } from "./store.js";
 export { SignalMap } from "./signal-map.js";

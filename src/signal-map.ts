@@ -11,6 +11,13 @@ import { signal, type Signal } from "./signal.js";
  *  get / ensure / clear / clearAll over any value type. */
 export class SignalMap<V> {
   private readonly map = new Map<string, Signal<V>>();
+  private readonly equals: ((a: V, b: V) => boolean) | undefined;
+
+  /** `equals` decides when a write to one of the map's signals is a change;
+   *  `Object.is` when omitted. */
+  constructor(options?: { readonly equals?: (a: V, b: V) => boolean }) {
+    this.equals = options?.equals;
+  }
 
   /** The signal for `id`, or undefined if none has been created yet. */
   get(id: string): Signal<V> | undefined {
@@ -21,7 +28,7 @@ export class SignalMap<V> {
   ensure(id: string, initial: V): Signal<V> {
     let sig = this.map.get(id);
     if (sig === undefined) {
-      sig = signal(initial);
+      sig = this.equals === undefined ? signal(initial) : signal(initial, { equals: this.equals });
       this.map.set(id, sig);
     }
     return sig;

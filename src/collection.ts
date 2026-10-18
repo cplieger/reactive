@@ -12,10 +12,9 @@ import { SignalMap } from "./signal-map.js";
 /** A reactive, ordered, keyed collection of entities of type T. */
 export interface Collection<T> {
   /** Replace the whole collection (e.g. initial load). Entities no longer
-   *  present are dropped; the order becomes `items`, deduplicated by key
-   *  (first occurrence keeps the position, the last value wins — Map
-   *  semantics), so the order tier can never list an id twice while the
-   *  entity tier holds a single signal for it. */
+   *  present are dropped; the order becomes `items`, deduplicated by key:
+   *  the first occurrence keeps the position, and a later value replaces the
+   *  held one only when `equals` reports a change. */
   setAll(items: readonly T[]): void;
   /** Add a new entity or replace an existing one (keyed by `keyOf`). New
    *  entities are appended to the order. */
@@ -49,15 +48,19 @@ export interface Collection<T> {
 }
 
 /** Create a reactive ordered keyed collection. `keyOf` derives a stable
- *  string id from an entity. */
-export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
+ *  string id from an entity; `equals` decides when a write of an entity is a
+ *  change to notify, `Object.is` when omitted. */
+export function createCollection<T>(
+  keyOf: (item: T) => string,
+  options?: { readonly equals?: (a: T, b: T) => boolean },
+): Collection<T> {
   // Shallow-equal so the structure tier fires only when the id sequence
   // actually changes (a same-order setAll updates entities without a
   // spurious structural re-render).
   const order = signal<readonly string[]>([], {
     equals: (a, b) => a.length === b.length && a.every((x, i) => x === b[i]),
   });
-  const sigs = new SignalMap<T>();
+  const sigs = new SignalMap<T>(options);
 
   function setAll(items: readonly T[]): void {
     // Atomic: batch the per-entity writes + the order swap so effects (and any
@@ -68,9 +71,7 @@ export function createCollection<T>(keyOf: (item: T) => string): Collection<T> {
       const seen = new Set<string>();
       for (const item of items) {
         const id = keyOf(item);
-        // Deduplicate repeated keys (first occurrence keeps the position, the
-        // last value wins) so the structure and entity tiers cannot disagree:
-        // one signal per id, one order entry per id.
+        // One order slot per id, matching the one signal per id.
         if (!seen.has(id)) {
           seen.add(id);
           ids.push(id);

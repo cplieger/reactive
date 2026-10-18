@@ -205,6 +205,113 @@ describe("re-entrancy", () => {
     expect(log).toEqual([0, 1, 2, 3]);
   });
 
+  it("a self-writing effect finishes its body before it re-runs", () => {
+    const s = signal(0);
+    const log: string[] = [];
+    let released = 0;
+    const dispose = effect(() => {
+      const v = s.value;
+      log.push(`start:${String(v)}`);
+      if (v < 2) {
+        s.value = v + 1;
+      }
+      log.push(`end:${String(v)}`);
+      return () => {
+        released++;
+      };
+    });
+    expect(log).toEqual(["start:0", "end:0", "start:1", "end:1", "start:2", "end:2"]);
+    expect(released).toBe(2);
+    dispose();
+    expect(released).toBe(3);
+  });
+
+  it("a cleanup writing its own effect's source finishes before the one re-run", () => {
+    const s = signal(0);
+    const log: string[] = [];
+    let acquired = 0;
+    let released = 0;
+    const dispose = effect(() => {
+      const v = s.value;
+      acquired++;
+      log.push(`body:${String(v)}`);
+      return () => {
+        log.push(`cleanup-start:${String(v)}`);
+        if (v === 0) {
+          s.value = 2;
+        }
+        log.push(`cleanup-end:${String(v)}`);
+        released++;
+      };
+    });
+    s.value = 1;
+    expect(log).toEqual(["body:0", "cleanup-start:0", "cleanup-end:0", "body:2"]);
+    dispose();
+    expect(released).toBe(acquired);
+  });
+
+  it("a self-write re-run leaves batch deferral intact", () => {
+    const s = signal(0);
+    effect(() => {
+      if (s.value === 0) {
+        s.value = 1;
+      }
+      return undefined;
+    });
+    const t = signal(0);
+    const spy = vi.fn();
+    effect(() => {
+      spy(t.value);
+      return undefined;
+    });
+    spy.mockClear();
+    batch(() => {
+      t.value = 1;
+      expect(spy).not.toHaveBeenCalled();
+    });
+    expect(spy).toHaveBeenCalledWith(1);
+  });
+
+  it("an effect re-queued by its self-write inside a batch drops no effect queued before it", () => {
+    const s = signal(0);
+    const t = signal(0);
+    const seen: number[] = [];
+    effect(() => {
+      seen.push(t.value);
+      return undefined;
+    });
+    batch(() => {
+      t.value = 1;
+      effect(() => {
+        if (s.value === 0) {
+          s.value = 1;
+        }
+        return undefined;
+      });
+      s.value = 2;
+    });
+    t.value = 2;
+    expect(seen).toEqual([0, 1, 2]);
+  });
+
+  it("a write in an effect still flushes the other effects before it returns", () => {
+    const trigger = signal(0);
+    const other = signal(0);
+    const seen: number[] = [];
+    effect(() => {
+      seen.push(other.value);
+      return undefined;
+    });
+    effect(() => {
+      other.value = trigger.value;
+      seen.push(-1);
+      return undefined;
+    });
+    seen.length = 0;
+    trigger.value = 5;
+    expect(seen).toEqual([5, -1]);
+  });
+
   it("self-incrementing effect converges without an infinite loop", () => {
     const s = signal(0);
     let runs = 0;
