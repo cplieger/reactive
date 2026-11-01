@@ -1,65 +1,10 @@
-// Reactive signals: signal<T>, effect (with cleanup), batch, computed, untracked.
-// Preact-style doubly-linked source/target edges, pull-based glitch-free refresh,
-// per-node version fast-skip, bitfield flags.
-// Apache-2.0.
-//
-// FLUSH MODEL — one phase, and the whole of it:
-//   1. A write flushes. When `sig.value = x` returns, every effect that depends
-//      on `sig` has already re-run. The setter opens an implicit batch, notifies,
-//      and drains before it returns, so there is no pending-effect state a caller
-//      can observe and no queue to drain.
-//   2. `batch(fn)` is the only deferral. Writes inside it coalesce; effects are
-//      held and run once, synchronously, when the OUTERMOST batch returns.
-//   3. Deferral beyond that is the caller's. To get effects on a later task,
-//      write on a later task (queueMicrotask, requestAnimationFrame). This module
-//      owns no scheduler and offers no flush barrier, because it never holds work.
-//
-// Clause 3 is why there is no `flushSync()`. A flush barrier is the API a
-// DEFERRED model owes its callers — Vue's `nextTick`, React's `flushSync` — and
-// an eager one owes none. The export existed until v2.0.0, could never find work
-// pending (endBatch drains the moment the depth reaches 0) and refused to act
-// when work WAS pending (it returned early above depth 0), so it was a no-op from
-// every position a caller could occupy; six mutants over its body were
-// permanently unkillable, and 71 consumer call sites had never done anything.
-// Anything reintroducing a barrier here is reintroducing that: the barrier is not
-// the missing piece, clause 1 is.
-//
-// Port provenance: graph/scheduler semantics verified against
-// @preact/signals-core@1.14.4 (drift audit 2026-07-17). The flush model above is
-// upstream's, including the absence of a barrier: upstream documents the write
-// contract in prose ("Changing a signal's value synchronously updates every
-// computed and effect that depends on that signal") and its surface is
-// signal/computed/effect/batch/untracked/createModel. Deliberate deltas from
-// upstream, pinned by tests: Object.is equality incl. NaN (upstream:
-// `!==`); custom `equals` / `equals: false` options (upstream has none);
-// isolate-and-continue effect error policy via setEffectErrorHandler
-// (upstream disposes-and-rethrows); the cycle guard lives in endBatch's drain
-// and un-notifies the chain it drops (upstream guards ONLY in the signal
-// setter, evaluated before the write, so it never drops a chain); and the drain
-// is re-entrant — `if (--batchDepth > 0) return` lets a write from an effect
-// body start a fresh drain, where upstream's `if (batchDepth > 1) return` plus
-// a post-drain `batchDepth--` keeps one drain per outermost batch.
-//
-// Upstream machinery NOT ported by design:
-//   - watched/unwatched hooks, createModel/action (1.13+);
-//   - the 1.14.x batch-snapshot A->B->A revert optimization — the
-//     version-monotonicity bug its first release carried
-//     (preactjs/signals#947) never existed here;
-//   - the `globalVersion` epoch fast-skip in refreshComputed. All three
-//     refresh call sites pre-check DIRTY, and because this port never
-//     unsubscribes a computed from its sources, notifyTargets always reaches
-//     every dependent computed — so DIRTY is a complete staleness signal.
-//     Upstream needs the epoch for computeds with no subscribers, which have
-//     no live edges. Do NOT try to revive it by deleting the DIRTY pre-checks:
-//     this refreshComputed has neither upstream's TRACKING shortcut nor its
-//     internal needsToRecompute gate, so an epoch miss recomputes
-//     unconditionally and six recompute-gating tests go red.
-//   - upstream's endBatch error capture and rethrow. Effect errors are
-//     isolated inside runEffect (see its contract below), so nothing can throw
-//     out of the drain and there was never anything to capture.
-//
-// Re-audit on upstream releases: diff src/index.ts against this file's
-// mechanisms and harvest engine-internal fixes (see CONTRIBUTING.md).
+// Signal engine: preact-style linked edges, pull-based glitch-free refresh.
+// User contract: docs/signals.md; upstream deltas: CONTRIBUTING.md. Invariants:
+// - A write flushes: when the setter returns, every dependent effect has run,
+//   except those still running, which are never interrupted; each one whose
+//   current run had already read the written signal re-runs once it returns.
+// - batch() is the only deferral; its effects run when the outermost returns.
+// - The drain is re-entrant: a write inside an effect starts a nested drain.
 
 const SIGNAL_BRAND = Symbol("signal");
 const COMPUTED_BRAND = Symbol("computed");
@@ -69,6 +14,7 @@ const DIRTY = 1;
 const RUNNING = 4;
 const DISPOSED = 8;
 const HAS_ERROR = 16;
+const RERUN = 32;
 const NOTIFIED = 64;
 
 // --- Linked-list Node for source↔target edges ---
@@ -113,6 +59,8 @@ interface EffectNode {
   _sources: DepNode | undefined;
   _nextBatchedEffect: EffectNode | undefined;
   _isComputed: false;
+  _owner: OwnerNode | undefined;
+  _scope: OwnerNode | undefined;
 }
 
 // --- Globals ---
@@ -148,6 +96,216 @@ export function setEffectErrorHandler(handler: EffectErrorHandler): EffectErrorH
   const prev = effectErrorHandler;
   effectErrorHandler = handler;
   return prev;
+}
+
+// --- Ownership ---
+const OPEN = 0;
+const CLOSING = 1;
+const CLOSED = 2;
+
+let currentOwner: OwnerNode | undefined;
+
+/** A disposal scope made by `createRoot`. Effects and roots created while it is
+ *  current are disposed with it. */
+export interface Owner {
+  /** Aborted when the owner is disposed, after its children and callbacks. */
+  readonly signal: AbortSignal;
+  /** Run `fn` when the owner is disposed, after its children, in reverse
+   *  registration order. On an owner already being disposed, or disposed, `fn`
+   *  runs at once. A throw goes to the effect error handler. */
+  onDispose(fn: () => void): void;
+}
+
+class OwnerNode implements Owner {
+  _state = OPEN;
+  _parent: OwnerNode | undefined;
+  _children: Set<OwnerNode | EffectNode> | undefined;
+  _callbacks: (() => void)[] | undefined;
+  // Created on first read: every run of an owned effect makes a scope, and
+  // few of them are ever asked for a signal.
+  _controller: AbortController | undefined;
+
+  constructor(parent: OwnerNode | undefined) {
+    this._parent = parent;
+    parent?._adopt(this);
+  }
+
+  get signal(): AbortSignal {
+    if (this._controller === undefined) {
+      this._controller = new AbortController();
+      if (this._state === CLOSED) {
+        this._controller.abort();
+      }
+    }
+    return this._controller.signal;
+  }
+
+  onDispose(fn: () => void): void {
+    if (this._state === OPEN) {
+      (this._callbacks ??= []).push(fn);
+      return;
+    }
+    runLateDisposeCallback(this, fn);
+  }
+
+  _adopt(child: OwnerNode | EffectNode): void {
+    (this._children ??= new Set()).add(child);
+  }
+}
+
+function assertOpen(owner: OwnerNode | undefined, what: string): void {
+  if (owner !== undefined && owner._state !== OPEN) {
+    throw new Error(`reactive: cannot create ${what} under an owner that is being disposed`);
+  }
+}
+
+function ownerNode(owner: Owner): OwnerNode {
+  if (owner instanceof OwnerNode) {
+    return owner;
+  }
+  throw new TypeError("reactive: not an owner made by createRoot");
+}
+
+function runDisposeCallback(fn: () => void): void {
+  try {
+    fn();
+  } catch (e) {
+    safeCallHandler(e);
+  }
+}
+
+function runLateDisposeCallback(owner: OwnerNode, fn: () => void): void {
+  const prevOwner = currentOwner;
+  const prevContext = evalContext;
+  currentOwner = owner;
+  evalContext = undefined;
+  runDisposeCallback(fn);
+  currentOwner = prevOwner;
+  evalContext = prevContext;
+}
+
+function disposeOwner(owner: OwnerNode): void {
+  if (owner._state === OPEN) {
+    markClosing(owner);
+    teardownOwner(owner);
+  }
+}
+
+// The whole subtree is marked before anything is torn down, so a write made by
+// a cleanup or callback mid-walk cannot re-run an effect of this subtree: the
+// drain skips DISPOSED effects.
+function markClosing(owner: OwnerNode): void {
+  owner._state = CLOSING;
+  if (owner._children === undefined) {
+    return;
+  }
+  for (const child of owner._children) {
+    if (child instanceof OwnerNode) {
+      markClosing(child);
+    } else {
+      child._flags |= DISPOSED;
+      if (child._scope !== undefined) {
+        markClosing(child._scope);
+      }
+    }
+  }
+}
+
+// Invariant: nothing in this walk throws (callbacks are isolated, effect
+// teardown never throws), so the context restore and the abort need no finally.
+function teardownOwner(owner: OwnerNode): void {
+  owner._parent?._children?.delete(owner);
+  owner._parent = undefined;
+  const prevOwner = currentOwner;
+  const prevContext = evalContext;
+  currentOwner = owner;
+  evalContext = undefined;
+  const children = owner._children;
+  owner._children = undefined;
+  if (children !== undefined) {
+    for (const child of [...children].reverse()) {
+      if (child instanceof OwnerNode) {
+        teardownOwner(child);
+      } else {
+        releaseEffect(child);
+      }
+    }
+  }
+  const callbacks = owner._callbacks;
+  owner._callbacks = undefined;
+  if (callbacks !== undefined) {
+    for (const fn of callbacks.reverse()) {
+      runDisposeCallback(fn);
+    }
+  }
+  currentOwner = prevOwner;
+  evalContext = prevContext;
+  owner._controller?.abort();
+  owner._state = CLOSED;
+}
+
+/** @internal The current owner, for a primitive that refuses to exist without
+ *  one. Throws outside any owner, or under one being disposed. */
+export function requireOwner(what: string): Owner {
+  if (currentOwner === undefined) {
+    throw new Error(`reactive: cannot create ${what} outside an owner`);
+  }
+  assertOpen(currentOwner, what);
+  return currentOwner;
+}
+
+/** @internal `createRoot` with an explicit parent, for `bindList`'s rows. */
+export function createRootUnder<T>(
+  parent: Owner | undefined,
+  fn: (dispose: () => void, owner: Owner) => T,
+): T {
+  const parentNode = parent === undefined ? undefined : ownerNode(parent);
+  assertOpen(parentNode, "a root");
+  const owner = new OwnerNode(parentNode);
+  const prevOwner = currentOwner;
+  const prevContext = evalContext;
+  currentOwner = owner;
+  evalContext = undefined;
+  try {
+    return fn(() => {
+      disposeOwner(owner);
+    }, owner);
+  } catch (e) {
+    disposeOwner(owner);
+    throw e;
+  } finally {
+    currentOwner = prevOwner;
+    evalContext = prevContext;
+  }
+}
+
+/** Run `fn` untracked in a new owner, child of the current one when there is
+ *  one, and return its result. Effects and roots created inside are disposed by
+ *  `dispose`, or with the parent. A throw from `fn` disposes the root and
+ *  rethrows. Throws when the current owner is being disposed. */
+export function createRoot<T>(fn: (dispose: () => void, owner: Owner) => T): T {
+  return createRootUnder(currentOwner, fn);
+}
+
+/** Run `fn` untracked with `owner` current, so what it creates is owned by
+ *  `owner`. Returns `undefined` without calling `fn` once `owner` is being
+ *  disposed or is disposed. Throws a TypeError for an object `createRoot` did
+ *  not make. */
+export function runWithOwner<T>(owner: Owner, fn: () => T): T | undefined {
+  const node = ownerNode(owner);
+  if (node._state !== OPEN) {
+    return undefined;
+  }
+  const prevOwner = currentOwner;
+  const prevContext = evalContext;
+  currentOwner = node;
+  evalContext = undefined;
+  try {
+    return fn();
+  } finally {
+    currentOwner = prevOwner;
+    evalContext = prevContext;
+  }
 }
 
 // --- Dependency tracking ---
@@ -269,19 +427,13 @@ function notifyTargets(source: SourceNode): void {
     if (target._isComputed) {
       // It's a ComputedNode
       if (target._flags & RUNNING) {
-        // A source written while this computed is mid-evaluation. Mark it stale
-        // so the next read re-runs it — every refresh call site pre-checks
-        // DIRTY, so without this the computed serves its pre-write value
-        // forever — but do NOT recurse: its own version has not moved yet, and
-        // recursing out of a RUNNING node is how a notify ping-pong is built.
-        //
-        // This repairs the PULL side only, deliberately. Two limits the next
-        // reader should not have to rediscover: (1) the computed's own
-        // subscribers are not woken here, so an effect that depends on it will
-        // not re-run until something else notifies it; (2) a computed that
-        // writes its own source unconditionally costs one extra recompute per
-        // read, and inside an effect it degrades into the documented
-        // MAX_BATCH_ITERATIONS "Cycle detected" path rather than hanging.
+        // A source written while this computed is mid-evaluation: mark it DIRTY
+        // so the next read recomputes (refresh callers check DIRTY first), but
+        // do not recurse: its version has not moved, and recursing out of a
+        // RUNNING node builds a notify ping-pong. Pull side only: its subscribers
+        // are not woken here, and a computed writing its own source costs one
+        // extra recompute per read, ending in the MAX_BATCH_ITERATIONS "Cycle
+        // detected" path inside an effect rather than hanging.
         target._flags |= DIRTY;
       } else if (!(target._flags & NOTIFIED)) {
         target._flags |= DIRTY | NOTIFIED;
@@ -289,8 +441,13 @@ function notifyTargets(source: SourceNode): void {
         target._flags &= ~NOTIFIED;
       }
     } else {
-      // It's an EffectNode
-      if (!(target._flags & NOTIFIED)) {
+      // It's an EffectNode. A running one, from its previous run's teardown to
+      // the end of its body, is never queued: a nested drain re-entering it
+      // would overwrite the scope and cleanup of the run still on the stack,
+      // so runEffect re-queues it once that run returns.
+      if (target._flags & RUNNING) {
+        target._flags |= RERUN;
+      } else if (!(target._flags & NOTIFIED)) {
         target._flags |= NOTIFIED;
         const eff = target as unknown as EffectNode;
         eff._nextBatchedEffect = batchedEffect;
@@ -324,13 +481,19 @@ function needsToRecompute(target: TargetNode): boolean {
 }
 
 // --- Computed refresh (pull-based, depth-first) ---
+// Callers check DIRTY first: there is no epoch fast-skip or staleness gate in
+// here, so a call on a clean computed recomputes it.
 function refreshComputed(comp: ComputedNode): void {
   if (comp._flags & RUNNING) {
     throw new Error("Cycle detected");
   }
 
   const prevContext = evalContext;
+  const prevOwner = currentOwner;
   evalContext = comp;
+  // A computed runs whenever it is read, so the reader's owner says nothing
+  // about it: what it creates is unowned.
+  currentOwner = undefined;
   const prevFlags = comp._flags;
   comp._flags = RUNNING;
 
@@ -356,6 +519,7 @@ function refreshComputed(comp: ComputedNode): void {
     }
   } finally {
     evalContext = prevContext;
+    currentOwner = prevOwner;
     cleanupSources(comp);
     if (!fnThrew) {
       comp._flags = comp._flags & ~RUNNING;
@@ -438,18 +602,23 @@ function endBatch(): void {
   batchIteration = enclosingIteration;
 }
 
-function runCleanup(eff: EffectNode): void {
+// `scope` is the disposed scope of the run being cleaned up, current during
+// the cleanup so an effect or root created there throws instead of escaping.
+function runCleanup(eff: EffectNode, scope: OwnerNode | undefined): void {
   if (eff._cleanup) {
     const c = eff._cleanup;
     eff._cleanup = undefined;
     const prevContext = evalContext;
+    const prevOwner = currentOwner;
     evalContext = undefined;
+    currentOwner = scope;
     try {
       c();
     } catch (e) {
       safeCallHandler(e);
     } finally {
       evalContext = prevContext;
+      currentOwner = prevOwner;
     }
   }
 }
@@ -462,12 +631,23 @@ function runCleanup(eff: EffectNode): void {
 // mid-drain — the same shape of failure as the cycle bail's NOTIFIED leak. If
 // you add a statement here that can throw, wrap it HERE, not at the call sites.
 function runEffect(eff: EffectNode): void {
-  // Run cleanup first (untracked)
-  runCleanup(eff);
+  // Set before the previous run's teardown, so a write from its cleanup or
+  // disposal callbacks finds this effect RUNNING (see notifyTargets).
+  eff._flags |= RUNNING;
+  const prevScope = eff._scope;
+  if (prevScope !== undefined) {
+    eff._scope = undefined;
+    disposeOwner(prevScope);
+  }
+  runCleanup(eff, prevScope);
 
   // Track dependencies
   const prevContext = evalContext;
+  const prevOwner = currentOwner;
+  const scope = eff._owner === undefined ? undefined : new OwnerNode(undefined);
+  eff._scope = scope;
   evalContext = eff;
+  currentOwner = scope;
   prepareSources(eff);
 
   try {
@@ -477,14 +657,47 @@ function runEffect(eff: EffectNode): void {
   } catch (e) {
     safeCallHandler(e);
   } finally {
+    eff._flags &= ~RUNNING;
     evalContext = prevContext;
+    currentOwner = prevOwner;
     cleanupSources(eff);
+  }
+  if (eff._flags & DISPOSED) {
+    // Disposed during its own run, alone or with its owner. The cleanup this
+    // run returned runs now, like a late onDispose, with the run's closed
+    // scope current; the edges the rest of the run made are dropped.
+    runCleanup(eff, scope);
+    releaseEffect(eff);
+  } else if (eff._flags & RERUN) {
+    eff._flags &= ~RERUN;
+    eff._flags |= NOTIFIED;
+    eff._nextBatchedEffect = batchedEffect;
+    batchedEffect = eff;
+    // Inside a batch this only queues it. Otherwise it drains now, one level
+    // deeper, so a self-write loop still meets the cycle cap, whose throw is
+    // routed here because this function never throws.
+    startBatch();
+    try {
+      endBatch();
+    } catch (e) {
+      safeCallHandler(e);
+    }
   }
 }
 
-function disposeEffect(eff: EffectNode): void {
-  // Run cleanup (untracked)
-  runCleanup(eff);
+// Disposes the run's scope first, then the cleanup, then the subscriptions.
+// The caller has already marked the scope closing. Idempotent, and never
+// throws: teardownOwner's walk relies on it.
+function releaseEffect(eff: EffectNode): void {
+  eff._flags |= DISPOSED;
+  eff._owner?._children?.delete(eff);
+  eff._owner = undefined;
+  const scope = eff._scope;
+  eff._scope = undefined;
+  if (scope !== undefined) {
+    teardownOwner(scope);
+  }
+  runCleanup(eff, scope);
 
   // Unsubscribe from all sources
   let node = eff._sources;
@@ -505,7 +718,6 @@ function disposeEffect(eff: EffectNode): void {
   // F5: null closures for GC
   eff._fn = undefined;
   eff._cleanup = undefined;
-  eff._flags |= DISPOSED;
 }
 
 // --- Public API ---
@@ -629,8 +841,13 @@ export function computed<T>(fn: () => T, options?: SignalOptions<T>): ReadonlySi
   return c;
 }
 
-/** Create a reactive effect that re-runs when its tracked signals change. Returns a dispose function. */
+/** Create a reactive effect that re-runs when its tracked signals change.
+ *  Returns a dispose function. Under an owner the effect is disposed with it,
+ *  and each run owns the effects and roots it creates, disposed before the next
+ *  run. Throws when the current owner is being disposed. */
 export function effect(fn: () => Cleanup): () => void {
+  const owner = currentOwner;
+  assertOpen(owner, "an effect");
   const eff: EffectNode = {
     _fn: fn,
     _cleanup: undefined,
@@ -638,16 +855,20 @@ export function effect(fn: () => Cleanup): () => void {
     _sources: undefined,
     _nextBatchedEffect: undefined,
     _isComputed: false,
+    _owner: owner,
+    _scope: undefined,
   };
+  owner?._adopt(eff);
 
   // Run immediately
   runEffect(eff);
 
+  // releaseEffect is idempotent, so a second dispose needs no guard.
   return () => {
-    if (eff._flags & DISPOSED) {
-      return;
+    if (eff._scope !== undefined) {
+      markClosing(eff._scope);
     }
-    disposeEffect(eff);
+    releaseEffect(eff);
   };
 }
 
@@ -673,22 +894,13 @@ export function untracked<T>(fn: () => T): T {
   }
 }
 
-/** Read a signal for its tracking effect alone, discarding the value.
- *
- *  The complement of `peek()`: `peek` reads without subscribing, `touch`
- *  subscribes without keeping. Outside a reactive scope it does nothing
- *  observable.
- *
- *  This exists because the two-tier shape `createCollection` and `bindList` are
- *  built on produces it: a scope reads per-entity values through `signalFor`,
- *  so it must depend on the structure signal separately to re-run when the id
- *  set changes, and that dependency has no value the body wants. `undefined`
- *  entries are accepted so a per-key lookup that may miss (`signalFor(id)`,
- *  `SignalMap.get(id)`) can be passed straight in.
- *
- *  Not a substitute for `on()`, which declares an exhaustive dependency list
- *  and runs its body untracked. `touch` ADDS a dependency and leaves every
- *  other read in the scope tracked as usual. */
+/** Read signals for their tracking alone, discarding the values: `peek` reads
+ *  without subscribing, `touch` subscribes without keeping. Outside a reactive
+ *  scope it does nothing observable. A scope reading per-entity values through
+ *  `signalFor` uses it to also re-run when the id set changes. `undefined`
+ *  entries are skipped, so a lookup that may miss (`signalFor(id)`,
+ *  `SignalMap.get(id)`) can be passed straight in. Unlike `on()`, it adds a
+ *  dependency and leaves the scope's other reads tracked. */
 export function touch(
   ...signals: readonly (Signal<unknown> | ReadonlySignal<unknown> | undefined)[]
 ): void {
@@ -729,15 +941,11 @@ export function isComputed(value: unknown): value is ReadonlySignal<unknown> {
   return value !== null && typeof value === "object" && COMPUTED_BRAND in value;
 }
 
-/** Explicit dependency declaration helper. Mirrors Solid's on().
- *
- * Overloaded so the return type and the `value`/`prev` parameter types stay
- * tight:
- *   - Without `defer` (or `{ defer: false }`) the accessor always returns `U`;
- *     only the `{ defer: true | boolean }` form widens to `U | undefined`
- *     (the deferred first call yields `undefined`).
- *   - A single accessor `() => T` correlates `value`/`prev` to `T`; an array of
- *     accessors correlates them to `unknown[]`. */
+/** Explicit dependency declaration helper, like Solid's `on()`. Without `defer`
+ *  (or with `{ defer: false }`) the accessor returns `U`; `{ defer: true |
+ *  boolean }` widens it to `U | undefined`, since the deferred first call yields
+ *  `undefined`. A single accessor `() => T` types `value` and `prev` as `T`; an
+ *  array of accessors types them as `unknown[]`. */
 // Single accessor, non-deferred (or explicit `{ defer: false }`): never undefined.
 export function on<T, U>(
   deps: () => T,

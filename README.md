@@ -10,8 +10,9 @@ It replaces the change listeners, list re-renders and element builder you would 
 
 reactive is built for a small browser app in plain TypeScript that needs no component framework.
 
-- Signals, computed values and effects track their dependencies on their own. When a write returns, every effect that depends on it has already run.
+- Signals, computed values and effects track their dependencies on their own. When a write returns, every effect that depends on it has already run, except those still running, which each finish before any re-run they need.
 - `createCollection` and `bindList` render a keyed list. Changing one item repaints only its row, and a reorder keeps the existing rows.
+- `createRoot` disposes a view's effects at once, and `resource` loads async data without painting a late answer over the next view.
 - `el` builds elements without HTML strings, so it works under a strict Content Security Policy. `patch` updates a subtree by reusing the elements on the page, so focus and scroll position survive a re-render.
 - The signals, stores, collections and event bus need no DOM, so they also run under Node, Deno, Bun or Workers.
 
@@ -94,9 +95,35 @@ effect(() => {
 name.value = "reactive"; // the same <h1> stays on the page with its new text
 ```
 
+`createRoot` owns what a view starts, and `resource` loads data for it. Disposing the root aborts the request, and a late answer writes nothing:
+
+```typescript
+import { createRoot, effect, el, resource, signal } from "@cplieger/reactive";
+
+const id = signal("a");
+const view = el("p");
+document.body.append(view);
+
+const dispose = createRoot((dispose) => {
+  const item = resource(
+    () => id.value,
+    (value, signal) => fetch(`/items/${value}`, { signal }).then((res) => res.text()),
+  );
+  effect(() => {
+    const s = item.value;
+    view.textContent = s.state === "ready" ? s.data : s.state;
+  });
+  return dispose;
+});
+
+id.value = "b"; // the request for "a" is aborted and its answer is dropped
+dispose();
+```
+
 ## API
 
 - Signals: `signal`, `computed`, `effect`, `batch`, `untracked`, `touch`, `on`, `subscribe`, `isSignal`, `isComputed` and `setEffectErrorHandler`.
+- Ownership and async: `createRoot` and `runWithOwner` for owners that dispose a tree of effects, and `resource` for async data as a `Loadable`.
 - State: `createStore` for a fixed set of typed keys, `SignalMap` for keys known only at run time, and `createCollection` for an ordered list of keyed items.
 - DOM: `el` builds elements, `reconcile` and `bindList` render keyed lists, and `patch` updates a subtree in place. `trackHandler` registers an `on*` handler on an element you built without `el`, so `patch` keeps it in step.
 - Events: `createBus` for typed events that hold no value.
@@ -129,26 +156,26 @@ This is the contract [@preact/signals-core](https://github.com/preactjs/signals/
 
 The package leaves these out on purpose. [Non-goals](docs/non-goals.md) gives the reason for each.
 
-- An ownership tree or `createRoot`, and automatic disposal of nested effects.
+- Ownership outside a root, and a public `getOwner()`.
 - Lazy activation and an `onMount` lifecycle.
 - `Signal.subtle.Watcher` and notify-on-dirty.
 - Introspection APIs, and explicit disposal of a computed.
 - Server-side rendering and per-request isolation.
-- Async signals and resources.
+- Suspense, or a resource that throws while loading.
 - Transactions, a custom scheduler, and a flush barrier such as `flushSync` or `nextTick`.
 - Controlled form inputs. `patch` syncs form values, so if a view can re-render while a user types, drive that field from an effect instead.
 - Writing a signal from inside a computed. The computed's own subscribers are not woken, so make that write in an effect.
 
 ## Documentation
 
-- [Signals, stores and collections](docs/signals.md) covers the flush model, effects, stores, collections and the event bus, for a reader writing state code.
+- [Signals, stores and collections](docs/signals.md) covers the flush model, effects, owners, resources, stores, collections and the event bus, for a reader writing state code.
 - [Building and updating the DOM](docs/dom.md) covers how `el`, `reconcile`, `bindList` and `patch` decide what to keep, for a reader rendering with them.
 - [Non-goals](docs/non-goals.md) lists what the package leaves out and why.
 
 ## Credits
 
 - The signal engine follows the design of [@preact/signals-core](https://github.com/preactjs/signals) in its dependency graph, its glitch-free computed refresh, its run-on-write effects and its untracked `subscribe` callback.
-- The `on()` helper follows [Solid](https://github.com/solidjs/solid)'s `on()`, and `untracked()` is Solid's `untrack()` under the name Preact gives it.
+- The `on()` helper follows [Solid](https://github.com/solidjs/solid)'s `on()`, and `untracked()` is Solid's `untrack()` under the name Preact gives it. `createRoot`, `runWithOwner` and owned nested effects follow Solid's ownership model.
 
 ## Contributing
 

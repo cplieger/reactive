@@ -1,16 +1,9 @@
-// Reactive signal core — the FLUSH MODEL itself.
-//
-// The engine has one phase: a write opens an implicit batch, notifies and drains
-// before the assignment returns, and `batch()` is the only deferral. That was the
-// behaviour all along and nothing asserted it — the file this replaced
-// (`signal-flush.test.ts`) tested the removed `flushSync()`'s batch-depth hygiene
-// instead, which is why the contract could drift into claiming a write leaves
-// effects pending.
-//
-// These tests pin clause 1 and clause 2 from every position a caller can occupy,
-// so a change that queues effects anywhere fails here rather than in a consumer.
-// Each one reads state on the statement AFTER the write, with no drain call in
-// between, because "there is no drain call" is the property.
+// The flush model (docs/signals.md): a write drains before the assignment
+// returns, and batch() is the only deferral. These tests pin both rules from
+// every position a caller can occupy, so a change that queues effects anywhere
+// fails here rather than in a consumer. Each one reads state on the statement
+// AFTER the write, with no drain call in between, because "there is no drain
+// call" is the property.
 import { describe, it, expect } from "vitest";
 import { signal, effect, batch, computed } from "./index.js";
 
@@ -31,9 +24,8 @@ describe("flush model: a write flushes before the assignment returns", () => {
   });
 
   it("has committed the DOM an effect writes, so the next statement can read it", () => {
-    // The consumer-facing form of clause 1: three UIs in this workspace read the
-    // DOM on the line after a write. If effects were queued, this measurement
-    // would be of the pre-write layout.
+    // The consumer-facing form of the write rule: a UI reads the DOM on the
+    // line after a write. If effects were queued, it would read the old DOM.
     const host = document.createElement("div");
     const label = signal("one");
     effect(() => {

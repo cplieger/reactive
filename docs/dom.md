@@ -4,7 +4,7 @@ This page describes the DOM half of reactive: `el`, `reconcile`, `bindList`, `pa
 
 ## What needs a DOM
 
-Only `el`, `bindList`, `reconcile`, `patch` and `trackHandler` need a DOM. The engine and the state functions do not: `signal`, `effect`, `computed`, `batch`, `untracked`, `createStore`, `SignalMap`, `createCollection` and `createBus`. Nothing touches the DOM when the package is imported. So importing it under Node, Deno, Bun or Workers succeeds, and only the DOM functions throw when called there.
+Only `el`, `bindList`, `reconcile`, `patch` and `trackHandler` need a DOM. The engine and the state functions do not: `signal`, `effect`, `computed`, `batch`, `untracked`, `createRoot`, `runWithOwner`, `resource`, `createStore`, `SignalMap`, `createCollection` and `createBus`. Nothing touches the DOM when the package is imported. So importing it under Node, Deno, Bun or Workers succeeds, and only the DOM functions throw when called there.
 
 ## Building elements with el
 
@@ -34,18 +34,19 @@ Elements that leave are removed before the others are placed. `onRemove` therefo
 
 ## Binding a list source with bindList
 
-`bindList(parent, source, spec)` renders a list in two tiers and returns a dispose function that stops both.
+`bindList(parent, source, spec)` renders a list in two tiers and returns a dispose function that stops both. The list is a root, a child of the current owner when there is one, so it is disposed with that owner too.
 
 - The structure tier is one effect that tracks `source.ids` and runs `reconcile` over the ids. Adding, removing or reordering items touches only the rows involved.
 - The content tier is one effect per row that tracks only that row's item signal. A change to one item repaints that row and nothing else.
+- Each row has its own owner. A reorder keeps each surviving row and its effects, and a row that leaves is disposed with everything created in its `mount` and `update`.
 
 `source` is a `ListSource<T>`, meaning `{ ids, signalFor }`. A collection from `createCollection` is one directly. A filtered, sorted or paged view is `{ ids: computed(...), signalFor: collection.signalFor }`. Pagination is therefore a sliced view of the ids, not a separate primitive. An id whose `signalFor` returns `undefined` is skipped. It can render after a later `ids` change reruns the structural effect.
 
 `spec` has three members:
 
-- `mount(item, id)` returns the row element. Keep it to the row's structure and let `update` fill the content.
+- `mount(item, id, owner)` returns the row element. `owner` is the row's owner, whose `signal` aborts when the row leaves. Keep `mount` to the row's structure and let `update` fill the content.
 - `update(el, item, id)` is optional. It runs when the row mounts and again on every change to its item.
-- `onRemove(el, id)` is optional and runs when the row leaves, before the element is removed.
+- `onRemove(el, id)` is optional and runs when the row leaves, after its owner is disposed and before the element is removed.
 
 ## Updating a subtree with patch
 
