@@ -909,7 +909,7 @@ export function touch(
   }
 }
 
-// deadset:ignore DS1803 -- returning the value keeps the tracking read from being a discarded expression; typescript-eslint rejects void on a property read
+// deadset:ignore DS1403 -- returning the value keeps the tracking read from being a discarded expression; typescript-eslint rejects void on a property read
 function readForDependency(sig: Signal<unknown> | ReadonlySignal<unknown> | undefined): unknown {
   return sig?.value;
 }
