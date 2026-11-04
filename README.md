@@ -1,5 +1,8 @@
 # reactive
 
+> Moved into [`@cplieger/ui`](https://github.com/cplieger/ui): import `@cplieger/ui/signal` and `@cplieger/ui/dom` instead, as the [migration guide](https://github.com/cplieger/ui/blob/main/docs/migrating.md) shows.
+> **Archived 2026-11-04. This repository is read-only. The published package stays available.**
+
 [![npm](https://img.shields.io/npm/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive) [![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/reactive/badges/mutation-ts.json)](https://github.com/cplieger/reactive/issues?q=label%3Astryker-tracker)
 
 reactive lets you build a framework-free TypeScript browser UI with signals, keyed list rendering and in-place DOM updates, in one package with no runtime dependencies.
