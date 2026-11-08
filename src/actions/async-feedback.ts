@@ -42,6 +42,18 @@ const defaultRenderSuccess = (): Node =>
   glyph([["stroke-linejoin", "round"]], "polyline", [["points", "20 6 9 17 4 12"]]);
 const defaultRenderError = (): Node => glyph([], "path", [["d", "M18 6L6 18M6 6l12 12"]]);
 
+/** A fragment empties into the button and leaves nothing to track, so its
+ *  nodes go into one wrapper that lays out as if it were not there. */
+function asOneNode(node: Node): Node {
+  if (node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+    return node;
+  }
+  const wrapper = document.createElement("span");
+  wrapper.style.display = "contents";
+  wrapper.append(node);
+  return wrapper;
+}
+
 // The restore of a cycle whose outcome glyph is still up, in its timed hold
 // or persisted, so the next cycle starts from the button's own content.
 const held = new WeakMap<HTMLButtonElement, () => void>();
@@ -191,14 +203,20 @@ export async function withAsyncFeedback(
   // is the app's.
   let shownNode: Node | null = null;
 
-  // Puts the button's own nodes back, as they were before the call.
+  // Puts the button's own nodes back, as they were before the call. A former
+  // child that now contains the button cannot go back inside it, so the
+  // content then stays as it is.
   const restoreContent = (): void => {
     if (useTarget) {
       if (currentSlot !== null && originalTarget !== null) {
         currentSlot.replaceWith(originalTarget);
         currentSlot = originalTarget;
       }
-    } else if (shownNode !== null && shownNode.parentNode === btn) {
+    } else if (
+      shownNode !== null &&
+      shownNode.parentNode === btn &&
+      !origNodes.some((n) => n.contains(btn))
+    ) {
       btn.replaceChildren(...origNodes);
     }
   };
@@ -207,7 +225,7 @@ export async function withAsyncFeedback(
   btn.disabled = true;
   btn.setAttribute("aria-busy", "true");
   try {
-    const pending = renderPending();
+    const pending = useTarget ? renderPending() : asOneNode(renderPending());
     if (useTarget) {
       swapSlot(pending);
     } else if (opts.keepLabel === true) {
@@ -243,7 +261,8 @@ export async function withAsyncFeedback(
   btn.dataset["asyncStatus"] = ok ? "success" : "error";
   let shown = true;
   try {
-    const outcome = ok ? renderSuccess() : renderError();
+    const rendered = ok ? renderSuccess() : renderError();
+    const outcome = useTarget ? rendered : asOneNode(rendered);
     if (useTarget) {
       swapSlot(outcome);
     } else {

@@ -930,3 +930,81 @@ describe("withAsyncFeedback — the button's own nodes and the app's content", (
     expect(document.activeElement).toBe(btn);
   });
 });
+
+describe("withAsyncFeedback — fragment renderers and a moved child", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const fragmentOf = (tag: string): (() => Node) => {
+    return () => {
+      const f = document.createDocumentFragment();
+      f.append(document.createElement(tag));
+      return f;
+    };
+  };
+
+  it("a renderSuccess that returns a fragment still gives the label back", async () => {
+    const btn = makeButton("<span>Save</span>");
+    const label = btn.firstElementChild;
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), { renderSuccess: fragmentOf("i") });
+    expect(btn.querySelector("i")).not.toBeNull();
+    vi.advanceTimersByTime(1200);
+
+    expect([...btn.childNodes]).toEqual([label]);
+  });
+
+  it.each([false, true])(
+    "a fragment from renderPending, then a throwing renderSuccess, leaves the label alone (keepLabel %s)",
+    async (keepLabel) => {
+      const btn = makeButton("<span>Save</span>");
+      const label = btn.firstElementChild;
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      await withAsyncFeedback(btn, () => Promise.resolve(), {
+        keepLabel,
+        renderPending: fragmentOf("b"),
+        renderSuccess: () => {
+          throw new Error("broken renderer");
+        },
+      });
+
+      expect([...btn.childNodes]).toEqual([label]);
+      expect(btn.disabled).toBe(false);
+    },
+  );
+
+  it("a former child that now wraps the button leaves the content and re-enables it", async () => {
+    const btn = makeButton("<span>Save</span>");
+    const label = btn.firstElementChild as HTMLElement;
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    label.append(btn);
+    document.body.append(label);
+    expect(() => vi.advanceTimersByTime(1200)).not.toThrow();
+
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("with resetMs 0, a former child that now wraps the button does not stop the next call", async () => {
+    const btn = makeButton("<span>Save</span>");
+    const label = btn.firstElementChild as HTMLElement;
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs: 0 });
+    label.append(btn);
+    document.body.append(label);
+
+    const second = vi.fn(() => Promise.resolve());
+    await expect(withAsyncFeedback(btn, second)).resolves.toBeUndefined();
+    const third = vi.fn(() => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    await withAsyncFeedback(btn, third);
+    expect([second.mock.calls.length, third.mock.calls.length]).toEqual([1, 1]);
+  });
+});
