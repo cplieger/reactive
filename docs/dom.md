@@ -1,10 +1,10 @@
 # Building and updating the DOM
 
-This page describes the DOM half of reactive: `el`, `reconcile`, `bindList`, `patch` and `trackHandler`. It is for a developer rendering with them who needs to know which elements are kept, which are copied and which are replaced.
+This page describes `@cplieger/reactive/dom`: `el`, `reconcile`, `bindList`, `patch` and `trackHandler`. It is for a developer rendering with them who needs to know which elements are kept, which are copied and which are replaced.
 
 ## What needs a DOM
 
-Only `el`, `bindList`, `reconcile`, `patch` and `trackHandler` need a DOM. The engine and the state functions do not: `signal`, `effect`, `computed`, `batch`, `untracked`, `createRoot`, `runWithOwner`, `resource`, `createStore`, `SignalMap`, `createCollection` and `createBus`. Nothing touches the DOM when the package is imported. So importing it under Node, Deno, Bun or Workers succeeds, and only the DOM functions throw when called there.
+Only `el`, `bindList`, `reconcile`, `patch` and `trackHandler` need a DOM. The engine and the state functions do not: `signal`, `effect`, `computed`, `batch`, `untracked`, `createRoot`, `runWithOwner`, `resource`, `createStore`, `SignalMap`, `createCollection` and `createBus`. Nothing touches the DOM when `@cplieger/reactive/signal`, `@cplieger/reactive/dom` or the package root is imported. So importing it under Node, Deno, Bun or Workers succeeds, and only the DOM functions throw when called there.
 
 ## Building elements with el
 

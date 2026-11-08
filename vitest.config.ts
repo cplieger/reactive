@@ -1,43 +1,108 @@
-// Vitest configuration for @cplieger/reactive unit tests.
-//
-// Every test file runs in a real headless Chromium through Browser Mode rather
-// than a DOM emulator. There is no `environment` and no per-file
-// `@vitest-environment` pragma: Browser Mode is not an environment, it is a
-// runner, and it replaces the emulator outright here because this package has no
-// pure-Node tests to keep out of the browser. The DOM half (`el`, `bindList`,
-// `reconcile`, `patch`) needs a real DOM, and the signal engine is indifferent
-// to which globals exist, so one project covers both.
-//
-// `channel: "chromium"` opts into Chromium's newer headless mode, which is the
-// real browser rather than the separate headless-shell build, so a behavior
-// verified here is the behavior a consumer gets. CI installs the browser with
-// `npx playwright install --with-deps chromium`; locally it is a one-time
-// `npx --no-install playwright install chromium`.
-//
-// Run: vitest --run (single pass) or vitest (watch mode).
+// One project per module group (signal and dom, fetch, actions), so each suite
+// keeps the settings it was written under. The signal, dom and fetch suites
+// never set the strict options, and a root-level `expect.requireAssertions`
+// reaches every project, `extends` or not, so they are spread only into the
+// projects that had them.
 import { playwright } from "@vitest/browser-playwright";
 import { defineConfig } from "vitest/config";
 
+function chromium() {
+  return {
+    enabled: true,
+    headless: true,
+    provider: playwright({
+      launchOptions: {
+        channel: "chromium",
+        // Chromium caps animation frames at ~60Hz, about 16.7ms per awaited frame.
+        args: ["--disable-frame-rate-limit"],
+      },
+    }),
+    instances: [{ browser: "chromium" as const }],
+    viewport: { width: 1280, height: 720 },
+    screenshotFailures: false,
+  };
+}
+
+const EXCLUDE = ["**/node_modules/**", "**/.stryker-tmp/**"];
+
+const strict = {
+  passWithNoTests: false,
+  allowOnly: false,
+  globals: false,
+  expect: {
+    requireAssertions: true,
+  },
+  clearMocks: true,
+  mockReset: true,
+  restoreMocks: true,
+  unstubEnvs: true,
+  unstubGlobals: true,
+  testTimeout: 5000,
+  hookTimeout: 10000,
+  sequence: {
+    shuffle: { files: false, tests: false },
+    concurrent: false,
+    hooks: "stack",
+  },
+  printConsoleTrace: true,
+  expandSnapshotDiff: true,
+  chaiConfig: {
+    truncateThreshold: 0,
+    showDiff: true,
+    includeStack: true,
+  },
+} as const;
+
 export default defineConfig({
   test: {
-    browser: {
-      enabled: true,
-      headless: true,
-      provider: playwright({
-        launchOptions: {
-          channel: "chromium",
-          // Chromium delivers animation frames at ~60Hz, so each frame a test awaits
-          // costs it ~16.7ms; this removes the cap.
-          args: ["--disable-frame-rate-limit"],
+    projects: [
+      {
+        test: {
+          name: "reactive",
+          isolate: true,
+          exclude: [...EXCLUDE, "src/**/*.node.test.ts"],
+          include: ["src/index.exports.test.ts", "src/signal/**/*.test.ts", "src/dom/**/*.test.ts"],
+          browser: chromium(),
         },
-      }),
-      instances: [{ browser: "chromium" }],
-      // Fixed viewport so anything layout-dependent is reproducible; a real
-      // browser computes real boxes, unlike the emulator this replaced.
-      viewport: { width: 1280, height: 720 },
-      // A failure screenshot per failing test is noise in CI and cannot be
-      // read from a job log; the assertion diff is the useful artifact.
-      screenshotFailures: false,
+      },
+      {
+        test: {
+          name: "fetch",
+          isolate: true,
+          exclude: [...EXCLUDE, "src/**/*.node.test.ts"],
+          include: ["src/fetch/**/*.test.ts"],
+          browser: chromium(),
+        },
+      },
+      {
+        test: {
+          ...strict,
+          name: "actions",
+          include: ["src/actions/**/*.test.ts"],
+          isolate: true,
+          exclude: [...EXCLUDE, "src/**/*.node.test.ts"],
+          browser: chromium(),
+        },
+      },
+      {
+        test: {
+          ...strict,
+          name: "node",
+          environment: "node",
+          isolate: true,
+          exclude: EXCLUDE,
+          include: ["src/**/*.node.test.ts"],
+        },
+      },
+    ],
+    bail: process.env["CI"] ? 1 : 0,
+    slowTestThreshold: 300,
+    coverage: {
+      provider: "v8",
+      include: ["src/**/*.ts"],
+      exclude: ["src/**/*.test.ts", "src/**/*.d.ts", "src/**/*-setup.ts", "src/**/test-helpers/**"],
+      reportOnFailure: true,
+      reporter: ["text", "text-summary", "lcov"],
     },
   },
 });
