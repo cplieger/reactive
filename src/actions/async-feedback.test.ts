@@ -803,3 +803,130 @@ describe("withAsyncFeedback — a live region that left the document", () => {
     vi.advanceTimersByTime(1200);
   });
 });
+
+describe("withAsyncFeedback — the button's own nodes and the app's content", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("puts the same child nodes back, with their listeners", async () => {
+    const btn = makeButton();
+    const label = document.createElement("span");
+    label.textContent = "Save";
+    const clicks = vi.fn();
+    label.addEventListener("click", clicks);
+    btn.replaceChildren(label);
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    expect(btn.firstChild).toBe(label);
+    label.textContent = "Saved";
+    label.click();
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(btn.textContent).toBe("Saved");
+  });
+
+  it("with resetMs 0, content the app wrote over the glyph is the next call's original", async () => {
+    const btn = makeButton("Before");
+    await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs: 0 });
+
+    const after = document.createElement("span");
+    after.textContent = "After";
+    btn.replaceChildren(after);
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    expect(btn.firstChild).toBe(after);
+    expect(btn.textContent).toBe("After");
+  });
+
+  it("content the app wrote during the timed hold stays", async () => {
+    const btn = makeButton("Before");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    btn.replaceChildren("After");
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.textContent).toBe("After");
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("a finished hold leaves no restore behind for a later call", async () => {
+    const btn = makeButton("Save");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    btn.disabled = true; // the app's own choice, after the cycle ended
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("when renderPending throws and fn removes the button, its own child stays", async () => {
+    const btn = makeButton("<span>Original</span>");
+    const label = btn.firstElementChild;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withAsyncFeedback(
+      btn,
+      () => {
+        btn.remove();
+        return Promise.resolve();
+      },
+      {
+        renderPending: () => {
+          throw new Error("broken renderer");
+        },
+      },
+    );
+
+    expect(btn.firstElementChild).toBe(label);
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("with target, a renderPending that returns a fragment leaves the target in place", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let release!: () => void;
+    const work = new Promise<void>((res) => {
+      release = res;
+    });
+
+    const cycle = withAsyncFeedback(btn, () => work, {
+      target,
+      renderPending: () => document.createDocumentFragment(),
+    });
+    expect(btn.firstElementChild).toBe(target);
+    release();
+    await cycle;
+
+    expect(btn.querySelector("polyline")).not.toBeNull();
+    vi.advanceTimersByTime(1200);
+    expect(btn.firstElementChild).toBe(target);
+  });
+
+  it("a call during the timed hold keeps the focus the hold owed back", async () => {
+    const btn = makeButton("Save");
+    btn.focus();
+    const blurred = blurredOff(btn);
+    let release!: () => void;
+    const work = new Promise<void>((res) => {
+      release = res;
+    });
+    const first = withAsyncFeedback(btn, () => work);
+    await blurred;
+    release();
+    await first; // the glyph is up and the button is still disabled
+
+    const second = withAsyncFeedback(btn, () => Promise.resolve());
+    await second;
+    vi.advanceTimersByTime(1200);
+    expect(document.activeElement).toBe(btn);
+  });
+});

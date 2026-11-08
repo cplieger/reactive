@@ -16,7 +16,7 @@
 The exported names are the same, and so is their behaviour, with two exceptions:
 
 - The errors the package throws, and the message it logs when an `onError` callback throws, begin with `@cplieger/reactive:` instead of `@cplieger/ui:`.
-- `withAsyncFeedback` builds its default glyphs without `innerHTML`, so it works on a page that enforces Trusted Types. It always resolves and gives the button back when a renderer throws, and a button that `fn` removes from the page comes back enabled. A call made while the previous glyph is still up starts from the button's own content. Its live region hides itself with inline styles, and is rebuilt when it leaves the document.
+- `withAsyncFeedback` builds its default glyphs without `innerHTML`, so it works on a page that enforces Trusted Types. It always resolves and gives the button back when a renderer throws, and a button that `fn` removes from the page, or that leaves it during the hold, comes back enabled. It puts the button's own child nodes back rather than copies, so their listeners and bindings survive, and it leaves content the app wrote over the glyph alone. A call made while the previous glyph is still up starts from the button's own content. Its live region hides itself with inline styles, and is rebuilt when it leaves the document.
 
 The widgets, icons and stylesheets stay in `@cplieger/ui`.
 

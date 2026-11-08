@@ -91,15 +91,16 @@ export interface AsyncFeedbackOptions {
    *  `<= 0` persists the glyph indefinitely (button still re-enables, but
    *  `data-async-status` keeps its terminal value). */
   resetMs?: number;
-  /** When true, prepend the spinner before the existing content (e.g.
-   *  "⟳ Cloning…") instead of replacing the content with just the spinner.
+  /** When true, prepend the pending node before the existing content (e.g.
+   *  "⟳ Cloning…") instead of replacing the content with just that node.
    *  Default false (icon-only replace). Ignored when {@link target} is set. */
   keepLabel?: boolean;
   /** Drive a single child slot via element replacement
    *  (`current.replaceWith(next)`) instead of the button's whole content;
-   *  other children of `btn` are untouched and the original node is restored
-   *  on a non-persist reset. Expected to be a descendant of `btn` (not
-   *  validated). `keepLabel` is ignored when set. */
+   *  other children of `btn` are untouched. The original node is restored at
+   *  the reset, or by the next call when the glyph persists. Each renderer
+   *  returns one element or text node; a fragment is refused. Expected to be
+   *  a descendant of `btn` (not validated). `keepLabel` is ignored when set. */
   target?: HTMLElement;
   /** Pending-state node factory. Returns a fresh node per call. */
   renderPending?: () => Node;
@@ -112,8 +113,10 @@ export interface AsyncFeedbackOptions {
 }
 
 /** Run an async function with consistent button feedback. The button is
- *  disabled during the call. Re-entrant calls (clicking again while a cycle
- *  is active) are ignored. */
+ *  disabled during the call. A call made while `fn` runs is ignored; a call
+ *  made while the previous outcome glyph is up takes it down first. The
+ *  button's own nodes go back at the end, the same nodes, unless the app has
+ *  written its own content over the glyph. */
 export async function withAsyncFeedback(
   btn: HTMLButtonElement,
   fn: () => Promise<unknown>,
@@ -159,7 +162,7 @@ export async function withAsyncFeedback(
     currentSlot = next as ChildNode;
   };
 
-  const origNodes = useTarget ? [] : [...btn.childNodes].map((n) => n.cloneNode(true));
+  const origNodes = useTarget ? [] : [...btn.childNodes];
   const origDisabled = btn.disabled;
   const origAriaBusy = btn.getAttribute("aria-busy");
   // Captured before disabling: `btn.disabled = true` below blurs the button.
@@ -183,34 +186,36 @@ export async function withAsyncFeedback(
     }
   };
 
-  // Puts the button's own content back, as it was before the call.
+  // The node this cycle last put in the button, if any. The button's own
+  // nodes go back only while it is still there: content the app wrote since
+  // is the app's.
+  let shownNode: Node | null = null;
+
+  // Puts the button's own nodes back, as they were before the call.
   const restoreContent = (): void => {
     if (useTarget) {
       if (currentSlot !== null && originalTarget !== null) {
         currentSlot.replaceWith(originalTarget);
         currentSlot = originalTarget;
       }
-    } else {
-      btn.replaceChildren(...origNodes.map((n) => n.cloneNode(true)));
+    } else if (shownNode !== null && shownNode.parentNode === btn) {
+      btn.replaceChildren(...origNodes);
     }
   };
-
-  // Whether this cycle replaced any of the button's content. When it did not,
-  // the button keeps its own nodes, with their listeners.
-  let changed = false;
 
   btn.dataset["asyncStatus"] = "pending";
   btn.disabled = true;
   btn.setAttribute("aria-busy", "true");
   try {
+    const pending = renderPending();
     if (useTarget) {
-      swapSlot(renderPending());
+      swapSlot(pending);
     } else if (opts.keepLabel === true) {
-      btn.prepend(renderPending(), document.createTextNode(" "));
+      btn.prepend(pending, document.createTextNode(" "));
     } else {
-      btn.replaceChildren(renderPending());
+      btn.replaceChildren(pending);
     }
-    changed = true;
+    shownNode = pending;
   } catch (e) {
     // The call still runs; the button shows its own content meanwhile.
     console.error("[actions] withAsyncFeedback renderPending threw", e);
@@ -228,9 +233,7 @@ export async function withAsyncFeedback(
   // button is left as it was, in case the app puts it back.
   if (!btn.isConnected) {
     inFlight.delete(btn);
-    if (changed) {
-      restoreContent();
-    }
+    restoreContent();
     btn.disabled = origDisabled;
     restoreAriaBusy();
     delete btn.dataset["asyncStatus"];
@@ -246,7 +249,7 @@ export async function withAsyncFeedback(
     } else {
       btn.replaceChildren(outcome);
     }
-    changed = true;
+    shownNode = outcome;
   } catch (e) {
     shown = false;
     console.error(`[actions] withAsyncFeedback ${ok ? "renderSuccess" : "renderError"} threw`, e);
@@ -259,12 +262,10 @@ export async function withAsyncFeedback(
 
   // With no glyph to hold, the button goes back to its content at once.
   if (!shown) {
-    if (changed) {
-      restoreContent();
-    }
+    restoreContent();
     btn.disabled = origDisabled;
-    restoreFocus();
     delete btn.dataset["asyncStatus"];
+    restoreFocus();
     return;
   }
 
@@ -273,8 +274,8 @@ export async function withAsyncFeedback(
   const reset = opts.resetMs ?? RESET_MS;
   if (reset <= 0) {
     btn.disabled = origDisabled;
-    restoreFocus();
     held.set(btn, restoreContent);
+    restoreFocus();
     return;
   }
 
@@ -293,5 +294,6 @@ export async function withAsyncFeedback(
   held.set(btn, () => {
     clearTimeout(timerId);
     finish();
+    restoreFocus();
   });
 }

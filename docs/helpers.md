@@ -54,7 +54,7 @@ Without a DOM, the pause and the focus refresh are skipped and the loop polls on
 
 ## Button feedback
 
-`withAsyncFeedback(button, fn, options?)` runs `fn` and shows its progress on the button: a pending node while it runs, then a check mark or a cross, then the original content.
+`withAsyncFeedback(button, fn, options?)` runs `fn` and shows its progress on the button: a pending node while it runs, then a check mark or a cross, then the original content. The button's own child nodes go back, the same nodes with their listeners and bindings, not copies. Content the app writes over the glyph stays: the original nodes go back only while the glyph is still in the button.
 
 - The button is disabled and marked `aria-busy` while `fn` runs. A second click during that time is ignored. A call made while the previous outcome glyph is still up takes that glyph down first.
 - A rejection from `fn` shows the cross. `withAsyncFeedback` itself always resolves, even when a renderer throws: the error is logged, and the button goes back to its content and is enabled again.
@@ -62,7 +62,7 @@ Without a DOM, the pause and the focus refresh are skipped and the loop polls on
 - `resetMs` is how long the outcome glyph stays, 1200 milliseconds by default. A value of 0 or less keeps the glyph, re-enables the button and leaves `data-async-status` on it.
 - `keepLabel: true` puts the pending node before the label instead of replacing it.
 - `target` runs the whole cycle on one child element, and leaves the label and other children alone. With `target`, each renderer returns one element or text node; a fragment is refused like a renderer that throws.
-- A button that `fn` removes from the page shows no outcome. It gets its content back and is enabled again, so it works if the app puts it back.
+- A button that `fn` removes from the page shows no outcome, and gets its content back and is enabled again. A button that leaves the page while its glyph is up gets the same at the end of the hold. Either way it works if the app puts it back.
 - `renderPending`, `renderSuccess` and `renderError` return your own nodes in place of the defaults.
 - The package ships no stylesheet, so style the defaults or replace them. The default pending node is an empty `<span class="spinner-sm btn-async-spinner">`, which shows nothing until your CSS draws it. The check mark and the cross are 14-pixel SVGs with the class `btn-async-glyph`, drawn in `currentColor`. They are built with the DOM API, so a page that enforces Trusted Types accepts them.
 - The announcements go to one shared live region, a `<span class="sr-only">` appended to `<body>`, which hides itself with inline styles. If it leaves the document, for example when the app replaces `<body>`'s children, the next announcement appends a new one.
