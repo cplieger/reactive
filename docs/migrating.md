@@ -17,6 +17,12 @@ The exported names are the same, and so is their behaviour. The one difference: 
 
 The widgets, icons and stylesheets stay in `@cplieger/ui`.
 
+`@cplieger/ui` 1.x carries its own copy of the signal engine, and its widgets bind to that copy, not to this one. In an app that runs both:
+
+- Move every `/signal`, `/dom` and `/actions` import to `@cplieger/reactive` in one change, so the app's own code shares one graph.
+- A ui 1.x widget created under a `@cplieger/reactive` owner, such as a `createRoot` or a `bindList` row, does not end when that owner is disposed. Create it under ui 1.x's `createRoot`, or dispose it yourself.
+- ui 1.x's `untracked` does not shield reads of `@cplieger/reactive` signals, and its `isSignal` returns false for them.
+
 ## From @cplieger/reactive 2.3
 
 The package root exports the same names, and they behave the same. Two things changed:

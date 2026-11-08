@@ -4,30 +4,43 @@ const RESET_MS = 1200;
 
 const DEFAULT_ANNOUNCE = { success: "Action completed", error: "Action failed" } as const;
 
-const CHECK_HTML =
-  '<svg class="btn-async-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
-  'stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" ' +
-  'aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>';
+const SVG_NS = "http://www.w3.org/2000/svg";
 
-const X_HTML =
-  '<svg class="btn-async-glyph" width="14" height="14" viewBox="0 0 24 24" fill="none" ' +
-  'stroke="currentColor" stroke-width="3" stroke-linecap="round" ' +
-  'aria-hidden="true"><path d="M18 6L6 18M6 6l12 12"/></svg>';
-
-/** Parse a static SVG string via <template> and return a fresh clone. The
- *  markup is a library-controlled constant, so a single root element is
- *  guaranteed. */
-function svgNode(svg: string): Node {
-  const template = document.createElement("template");
-  template.innerHTML = svg;
-  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- default glyph markup always has a single root element
-  return template.content.firstElementChild!.cloneNode(true);
+/** A default outcome glyph, built with the DOM API so a page that enforces
+ *  Trusted Types does not throw. `svgAttrs` follow the shared ones in order. */
+function glyph(
+  svgAttrs: readonly (readonly [string, string])[],
+  shape: string,
+  shapeAttrs: readonly (readonly [string, string])[],
+): Element {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  for (const [name, value] of [
+    ["class", "btn-async-glyph"],
+    ["width", "14"],
+    ["height", "14"],
+    ["viewBox", "0 0 24 24"],
+    ["fill", "none"],
+    ["stroke", "currentColor"],
+    ["stroke-width", "3"],
+    ["stroke-linecap", "round"],
+    ...svgAttrs,
+    ["aria-hidden", "true"],
+  ] as const) {
+    svg.setAttribute(name, value);
+  }
+  const child = document.createElementNS(SVG_NS, shape);
+  for (const [name, value] of shapeAttrs) {
+    child.setAttribute(name, value);
+  }
+  svg.append(child);
+  return svg;
 }
 
 const defaultRenderPending = (): Node =>
   el("span", { className: "spinner-sm btn-async-spinner", "aria-hidden": "true" });
-const defaultRenderSuccess = (): Node => svgNode(CHECK_HTML);
-const defaultRenderError = (): Node => svgNode(X_HTML);
+const defaultRenderSuccess = (): Node =>
+  glyph([["stroke-linejoin", "round"]], "polyline", [["points", "20 6 9 17 4 12"]]);
+const defaultRenderError = (): Node => glyph([], "path", [["d", "M18 6L6 18M6 6l12 12"]]);
 
 const resetTimers = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
 
@@ -43,6 +56,19 @@ function announce(message: string): void {
       className: "sr-only",
       "aria-live": "polite",
       "aria-atomic": "true",
+    });
+    // Visually hidden on its own, so a page with no `.sr-only` rule does not
+    // show the announcement as text.
+    Object.assign(liveRegion.style, {
+      position: "absolute",
+      width: "1px",
+      height: "1px",
+      margin: "-1px",
+      padding: "0",
+      border: "0",
+      overflow: "hidden",
+      clipPath: "inset(50%)",
+      whiteSpace: "nowrap",
     });
     document.body.appendChild(liveRegion);
   }
@@ -148,15 +174,32 @@ export async function withAsyncFeedback(
     }
   };
 
+  // Puts the button's own content back, as it was before the call.
+  const restoreContent = (): void => {
+    if (useTarget) {
+      if (currentSlot !== null && originalTarget !== null) {
+        currentSlot.replaceWith(originalTarget);
+        currentSlot = originalTarget;
+      }
+    } else {
+      btn.replaceChildren(...origNodes.map((n) => n.cloneNode(true)));
+    }
+  };
+
   btn.dataset["asyncStatus"] = "pending";
   btn.disabled = true;
   btn.setAttribute("aria-busy", "true");
-  if (useTarget) {
-    swapSlot(renderPending());
-  } else if (opts.keepLabel === true) {
-    btn.prepend(renderPending(), document.createTextNode(" "));
-  } else {
-    btn.replaceChildren(renderPending());
+  try {
+    if (useTarget) {
+      swapSlot(renderPending());
+    } else if (opts.keepLabel === true) {
+      btn.prepend(renderPending(), document.createTextNode(" "));
+    } else {
+      btn.replaceChildren(renderPending());
+    }
+  } catch (e) {
+    // The call still runs; the button shows its own content meanwhile.
+    console.error("[actions] withAsyncFeedback renderPending threw", e);
   }
 
   let ok = true;
@@ -176,15 +219,31 @@ export async function withAsyncFeedback(
   }
 
   btn.dataset["asyncStatus"] = ok ? "success" : "error";
-  if (useTarget) {
-    swapSlot(ok ? renderSuccess() : renderError());
-  } else {
-    btn.replaceChildren(ok ? renderSuccess() : renderError());
+  let shown = true;
+  try {
+    const outcome = ok ? renderSuccess() : renderError();
+    if (useTarget) {
+      swapSlot(outcome);
+    } else {
+      btn.replaceChildren(outcome);
+    }
+  } catch (e) {
+    shown = false;
+    console.error(`[actions] withAsyncFeedback ${ok ? "renderSuccess" : "renderError"} threw`, e);
   }
   restoreAriaBusy();
   inFlight.delete(btn);
   if (announceCfg !== false) {
     announce(ok ? announceCfg.success : announceCfg.error);
+  }
+
+  // With no glyph to hold, the button goes back to its content at once.
+  if (!shown) {
+    restoreContent();
+    btn.disabled = origDisabled;
+    restoreFocus();
+    delete btn.dataset["asyncStatus"];
+    return;
   }
 
   // `resetMs <= 0` persists: no revert timer, but re-enable now since no
@@ -201,14 +260,7 @@ export async function withAsyncFeedback(
     if (!btn.isConnected) {
       return;
     }
-    if (useTarget) {
-      if (currentSlot !== null && originalTarget !== null) {
-        currentSlot.replaceWith(originalTarget);
-        currentSlot = originalTarget;
-      }
-    } else {
-      btn.replaceChildren(...origNodes.map((n) => n.cloneNode(true)));
-    }
+    restoreContent();
     btn.disabled = origDisabled;
     restoreFocus();
     delete btn.dataset["asyncStatus"];

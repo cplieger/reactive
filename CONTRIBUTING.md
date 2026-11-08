@@ -4,7 +4,7 @@ The [shared rules](https://github.com/cplieger/.github/blob/main/CONTRIBUTING.md
 
 ## Scope
 
-The package holds state, rendering, requests and actions, and draws nothing. The actions module ships no notification display and no streaming transport. An app connects its own through `configure` and `configureTransport`, so a change that builds a toast, a widget or a default transport into `src/` is out of scope.
+The package holds state, rendering, requests and actions, and ships no widgets or stylesheets. The actions module ships no notification display and no streaming transport. An app connects its own through `configure` and `configureTransport`, so a change that builds a toast, a widget or a default transport into `src/` is out of scope.
 
 ## Rules
 

@@ -4,7 +4,7 @@
 
 `@cplieger/reactive` lets you build a TypeScript browser app without a framework, from signals, keyed DOM rendering, typed JSON requests and server actions.
 
-It replaces the change listeners, list re-renders, `try`/`catch` blocks and loading flags you would otherwise write between state, the server and the page. It has no runtime dependencies and ships as ESM-only TypeScript source, so it needs a bundler or runtime that compiles TypeScript 6 or later. It draws nothing: widgets, icons and stylesheets are in [`@cplieger/ui`](https://github.com/cplieger/ui). It is licensed under Apache-2.0.
+It replaces the change listeners, list re-renders, `try`/`catch` blocks and loading flags you would otherwise write between state, the server and the page. It has no runtime dependencies and ships as ESM-only TypeScript source, so it needs a bundler or runtime that compiles TypeScript 6 or later. It ships no widgets, icons or stylesheets; those are in [`@cplieger/ui`](https://github.com/cplieger/ui). It is licensed under Apache-2.0.
 
 ## Why use it
 
@@ -95,7 +95,7 @@ Import each part from its own subpath. Code that imports these from `@cplieger/u
 - State, from `/signal` or the root: `createStore`, `SignalMap`, `createCollection` and `createBus`.
 - DOM, from `/dom` or the root: `el`, `reconcile`, `KEY_ATTR`, `bindList`, `patch` and `trackHandler`.
 - Requests, from `/fetch`: `createFetch` with its `apiGet`, `apiPost`, `apiPut`, `apiPatch` and `apiDelete` helpers, `withTimeout` and `API_TIMEOUT_MS`.
-- Actions, from `/actions`: `configure`, `configureApi`, `configureTransport`, `defineAction`, `apiAction`, `transportAction`, the helpers `debouncedDispatch`, `pollAction`, `pollUntil`, `bindLoadingState`, `withAsyncFeedback` and `registerCleanup`, and the state reads `isPending`, `pendingCount`, `subscribeToActions`, `subscribeByName` and `getActionLog`.
+- Actions, from `/actions`: `configure`, `configureApi`, `configureTransport`, `defineAction`, `apiAction`, `transportAction`, the errors and retry policy `ActionError`, `hasErrorString`, `classifyFetchError`, `retryNetwork` and `RETRY_STANDARD`, the idempotency names `IDEMPOTENCY_HEADER` and `IDEMPOTENCY_COMMAND_FIELD`, the helpers `debouncedDispatch`, `pollAction`, `pollUntil`, `bindLoadingState`, `withAsyncFeedback` and `registerCleanup`, and the state reads `isPending`, `pendingCount`, `subscribeToActions`, `subscribeByName` and `getActionLog`.
 
 The full reference, generated from the doc comments, is on [JSR](https://jsr.io/@cplieger/reactive/doc).
 

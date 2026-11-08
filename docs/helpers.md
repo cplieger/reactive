@@ -54,15 +54,17 @@ Without a DOM, the pause and the focus refresh are skipped and the loop polls on
 
 ## Button feedback
 
-`withAsyncFeedback(button, fn, options?)` runs `fn` and shows its progress on the button. A spinner shows while it runs, then a check mark or a cross, then the original content.
+`withAsyncFeedback(button, fn, options?)` runs `fn` and shows its progress on the button: a pending node while it runs, then a check mark or a cross, then the original content.
 
 - The button is disabled and marked `aria-busy` while `fn` runs. A second click during that time is ignored.
-- A rejection from `fn` shows the cross. `withAsyncFeedback` itself always resolves.
+- A rejection from `fn` shows the cross. `withAsyncFeedback` itself always resolves, even when a renderer throws: the error is logged, and the button goes back to its content and is enabled again.
 - A screen reader hears "Action completed" or "Action failed". `announce: { success, error }` changes the text, and `announce: false` turns it off.
 - `resetMs` is how long the outcome glyph stays, 1200 milliseconds by default. A value of 0 or less keeps the glyph, re-enables the button and leaves `data-async-status` on it.
 - `keepLabel: true` puts the spinner before the label instead of replacing it.
 - `target` runs the whole cycle on one child element, and leaves the label and other children alone.
-- `renderPending`, `renderSuccess` and `renderError` return your own nodes in place of the default SVG glyphs.
+- `renderPending`, `renderSuccess` and `renderError` return your own nodes in place of the defaults.
+- The package ships no stylesheet, so style the defaults or replace them. The default pending node is an empty `<span class="spinner-sm btn-async-spinner">`, which shows nothing until your CSS draws it. The check mark and the cross are 14-pixel SVGs with the class `btn-async-glyph`, drawn in `currentColor`. They are built with the DOM API, so a page that enforces Trusted Types accepts them.
+- The announcements go to one shared live region, a `<span class="sr-only">` at the end of `<body>`, which hides itself with inline styles.
 
 ## Watching actions
 

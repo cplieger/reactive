@@ -35,6 +35,15 @@ describe("withAsyncFeedback — live region announce", () => {
     expect(region?.getAttribute("aria-live")).toBe("polite");
     expect(region?.getAttribute("aria-atomic")).toBe("true");
     expect(region?.textContent).toBe("Action completed");
+    // Hidden by its own inline styles, so a page with no .sr-only rule shows nothing.
+    const style = (region as HTMLElement).style;
+    expect([style.position, style.width, style.height, style.overflow, style.clipPath]).toEqual([
+      "absolute",
+      "1px",
+      "1px",
+      "hidden",
+      "inset(50%)",
+    ]);
     vi.advanceTimersByTime(1200);
   });
 });
@@ -513,5 +522,104 @@ describe("withAsyncFeedback — focus restore", () => {
 
     expect(btn.disabled).toBe(false);
     expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe("withAsyncFeedback — Trusted Types and throwing renderers", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Run `body` with innerHTML assignment refused, as a page that enforces
+   *  Trusted Types refuses a plain string. */
+  async function withoutInnerHTML(body: () => Promise<void>): Promise<void> {
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+    if (desc === undefined) throw new Error("no innerHTML descriptor");
+    Object.defineProperty(Element.prototype, "innerHTML", {
+      ...desc,
+      set() {
+        throw new TypeError("This document requires 'TrustedHTML' assignment.");
+      },
+    });
+    try {
+      await body();
+    } finally {
+      Object.defineProperty(Element.prototype, "innerHTML", desc);
+    }
+  }
+
+  it("builds its default glyphs without innerHTML", async () => {
+    const ok = makeButton("Original");
+    const failed = document.createElement("button");
+    failed.type = "button";
+    failed.append("Original");
+    document.body.append(failed);
+    await withoutInnerHTML(async () => {
+      await withAsyncFeedback(ok, () => Promise.resolve());
+      await withAsyncFeedback(failed, () => Promise.reject(new Error("fail")));
+    });
+
+    expect(ok.querySelector("svg.btn-async-glyph polyline")?.getAttribute("points")).toBe(
+      "20 6 9 17 4 12",
+    );
+    expect(failed.querySelector("svg.btn-async-glyph path")?.getAttribute("d")).toBe(
+      "M18 6L6 18M6 6l12 12",
+    );
+    expect(ok.querySelector("svg")?.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    vi.advanceTimersByTime(1200);
+    expect([ok.disabled, failed.disabled]).toEqual([false, false]);
+  });
+
+  it.each(["renderSuccess", "renderError"] as const)(
+    "a %s that throws resolves and gives the button back at once",
+    async (which) => {
+      const btn = makeButton("<span>Original</span>");
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const fn =
+        which === "renderSuccess" ? () => Promise.resolve() : () => Promise.reject(new Error("x"));
+
+      await expect(
+        withAsyncFeedback(btn, fn, {
+          [which]: () => {
+            throw new Error("broken renderer");
+          },
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-busy")).toBeNull();
+      expect(btn.dataset["asyncStatus"]).toBeUndefined();
+      expect(btn.innerHTML).toBe("<span>Original</span>");
+      expect(logged).toHaveBeenCalledWith(
+        `[actions] withAsyncFeedback ${which} threw`,
+        expect.any(Error),
+      );
+
+      const next = vi.fn(() => Promise.resolve());
+      await withAsyncFeedback(btn, next);
+      expect(next).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("a renderPending that throws still runs the call", async () => {
+    const btn = makeButton("Original");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fn = vi.fn(() => Promise.resolve());
+
+    await withAsyncFeedback(btn, fn, {
+      renderPending: () => {
+        throw new Error("broken renderer");
+      },
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    vi.advanceTimersByTime(1200);
+    expect(btn.disabled).toBe(false);
+    expect(btn.innerHTML).toBe("Original");
   });
 });
