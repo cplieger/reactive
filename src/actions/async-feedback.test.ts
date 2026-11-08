@@ -623,3 +623,183 @@ describe("withAsyncFeedback — Trusted Types and throwing renderers", () => {
     expect(btn.innerHTML).toBe("Original");
   });
 });
+
+describe("withAsyncFeedback — a cycle that starts while a glyph is up", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("takes the glyph down first, so the button comes back enabled with its content", async () => {
+    const btn = makeButton("<span>Original</span>");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+
+    const second = vi.fn(() => Promise.resolve());
+    await withAsyncFeedback(btn, second);
+    expect(second).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(5000);
+    expect(btn.disabled).toBe(false);
+    expect(btn.innerHTML).toBe("<span>Original</span>");
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("with target and a persisted glyph, a second call that fails shows the cross", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), { target, resetMs: 0 });
+    expect(btn.querySelector("polyline")).not.toBeNull();
+
+    let fail!: (e: Error) => void;
+    const gate = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    const second = withAsyncFeedback(btn, () => gate, { target, resetMs: 0 });
+    expect(btn.querySelector(".btn-async-spinner")).not.toBeNull();
+    expect(btn.querySelector("polyline")).toBeNull();
+    fail(new Error("x"));
+    await second;
+
+    expect(btn.dataset["asyncStatus"]).toBe("error");
+    expect(btn.querySelector("path")?.getAttribute("d")).toBe("M18 6L6 18M6 6l12 12");
+    expect(btn.querySelector("polyline")).toBeNull();
+  });
+});
+
+describe("withAsyncFeedback — target renderers and throwing branches", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("with target, a renderer that returns a fragment is refused and the call still resolves", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fragment = (): Node => {
+      const f = document.createDocumentFragment();
+      f.append(document.createElement("i"));
+      return f;
+    };
+
+    await expect(
+      withAsyncFeedback(btn, () => Promise.resolve(), { target, renderSuccess: fragment }),
+    ).resolves.toBeUndefined();
+
+    expect(btn.firstElementChild).toBe(target);
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.querySelector("i")).toBeNull();
+    expect(logged).toHaveBeenCalledWith(
+      "[actions] withAsyncFeedback renderSuccess threw",
+      expect.any(TypeError),
+    );
+  });
+
+  it("with target, a renderError that throws puts the exact target node back", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withAsyncFeedback(btn, () => Promise.reject(new Error("x")), {
+      target,
+      renderError: () => {
+        throw new Error("broken renderer");
+      },
+    });
+
+    expect(btn.firstElementChild).toBe(target);
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("a focused button whose renderSuccess throws gets its focus back", async () => {
+    const btn = makeButton("Original");
+    btn.focus();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let release!: () => void;
+    const work = new Promise<void>((res) => {
+      release = res;
+    });
+    const blurred = blurredOff(btn);
+
+    const cycle = withAsyncFeedback(btn, () => work, {
+      renderSuccess: () => {
+        throw new Error("broken renderer");
+      },
+    });
+    // The browser drops focus off a disabled element by itself.
+    await blurred;
+    expect(document.activeElement).not.toBe(btn);
+    release();
+    await cycle;
+
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("with resetMs 0, a renderSuccess that throws re-enables and clears the status", async () => {
+    const btn = makeButton("Original");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      resetMs: 0,
+      renderSuccess: () => {
+        throw new Error("broken renderer");
+      },
+    });
+
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.textContent).toBe("Original");
+  });
+
+  it("when no renderer inserts anything, the button keeps its own nodes", async () => {
+    const btn = makeButton("<span>Original</span>");
+    const label = btn.firstElementChild;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const broken = (): Node => {
+      throw new Error("broken renderer");
+    };
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      renderPending: broken,
+      renderSuccess: broken,
+    });
+
+    expect(btn.firstElementChild).toBe(label);
+    expect(btn.disabled).toBe(false);
+  });
+});
+
+describe("withAsyncFeedback — a live region that left the document", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is rebuilt, so the next announcement is heard", async () => {
+    const first = makeButton();
+    await withAsyncFeedback(first, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    const second = makeButton(); // replaces <body>'s children, live region included
+    await withAsyncFeedback(second, () => Promise.reject(new Error("x")));
+    vi.advanceTimersByTime(50);
+
+    const regions = document.querySelectorAll('[aria-live="polite"]');
+    expect(regions.length).toBe(1);
+    expect(regions[0]?.isConnected).toBe(true);
+    expect(regions[0]?.textContent).toBe("Action failed");
+    vi.advanceTimersByTime(1200);
+  });
+});

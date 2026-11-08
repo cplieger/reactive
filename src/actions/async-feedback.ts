@@ -42,7 +42,9 @@ const defaultRenderSuccess = (): Node =>
   glyph([["stroke-linejoin", "round"]], "polyline", [["points", "20 6 9 17 4 12"]]);
 const defaultRenderError = (): Node => glyph([], "path", [["d", "M18 6L6 18M6 6l12 12"]]);
 
-const resetTimers = new WeakMap<HTMLButtonElement, ReturnType<typeof setTimeout>>();
+// The restore of a cycle whose outcome glyph is still up, in its timed hold
+// or persisted, so the next cycle starts from the button's own content.
+const held = new WeakMap<HTMLButtonElement, () => void>();
 
 // Keyed on this, not `data-async-status`, so a persisted outcome glyph
 // (resetMs<=0) can't permanently block re-dispatch.
@@ -51,7 +53,9 @@ const inFlight = new WeakSet<HTMLButtonElement>();
 let liveRegion: HTMLElement | null = null;
 
 function announce(message: string): void {
-  if (liveRegion === null) {
+  // A region that left the document, such as when the app replaced <body>'s
+  // children, is rebuilt, or no screen reader would hear the message.
+  if (!liveRegion?.isConnected) {
     liveRegion = el("span", {
       className: "sr-only",
       "aria-live": "polite",
@@ -122,11 +126,12 @@ export async function withAsyncFeedback(
   }
   inFlight.add(btn);
 
-  // Avoids a stale restore from a prior cycle.
-  const prevTimer = resetTimers.get(btn);
-  if (prevTimer !== undefined) {
-    clearTimeout(prevTimer);
-    resetTimers.delete(btn);
+  // A glyph still up from the previous cycle comes down first, so this cycle
+  // reads the button's own content and state as its original.
+  const prev = held.get(btn);
+  if (prev !== undefined) {
+    held.delete(btn);
+    prev();
   }
 
   const renderPending = opts.renderPending ?? defaultRenderPending;
@@ -141,10 +146,14 @@ export async function withAsyncFeedback(
   const originalTarget: ChildNode | null = useTarget ? target : null;
   let currentSlot: ChildNode | null = useTarget ? target : null;
 
-  // Render factories return Element/Text, both ChildNode at runtime.
+  // The slot holds one node, so a fragment, which empties into the page and
+  // leaves nothing to swap next, is refused before anything changes.
   const swapSlot = (next: Node): void => {
     if (currentSlot === null) {
       return;
+    }
+    if (next.nodeType === Node.DOCUMENT_FRAGMENT_NODE) {
+      throw new TypeError("a target renderer must return an element or a text node");
     }
     currentSlot.replaceWith(next);
     currentSlot = next as ChildNode;
@@ -186,6 +195,10 @@ export async function withAsyncFeedback(
     }
   };
 
+  // Whether this cycle replaced any of the button's content. When it did not,
+  // the button keeps its own nodes, with their listeners.
+  let changed = false;
+
   btn.dataset["asyncStatus"] = "pending";
   btn.disabled = true;
   btn.setAttribute("aria-busy", "true");
@@ -197,6 +210,7 @@ export async function withAsyncFeedback(
     } else {
       btn.replaceChildren(renderPending());
     }
+    changed = true;
   } catch (e) {
     // The call still runs; the button shows its own content meanwhile.
     console.error("[actions] withAsyncFeedback renderPending threw", e);
@@ -209,10 +223,15 @@ export async function withAsyncFeedback(
     ok = false;
   }
 
-  // The async op may have removed btn from the DOM (e.g. a re-rendered list);
-  // the new DOM already reflects the result.
+  // The async op may have removed btn from the DOM (e.g. a re-rendered list).
+  // The new DOM already reflects the result, so no outcome shows, but the
+  // button is left as it was, in case the app puts it back.
   if (!btn.isConnected) {
     inFlight.delete(btn);
+    if (changed) {
+      restoreContent();
+    }
+    btn.disabled = origDisabled;
     restoreAriaBusy();
     delete btn.dataset["asyncStatus"];
     return;
@@ -227,6 +246,7 @@ export async function withAsyncFeedback(
     } else {
       btn.replaceChildren(outcome);
     }
+    changed = true;
   } catch (e) {
     shown = false;
     console.error(`[actions] withAsyncFeedback ${ok ? "renderSuccess" : "renderError"} threw`, e);
@@ -239,7 +259,9 @@ export async function withAsyncFeedback(
 
   // With no glyph to hold, the button goes back to its content at once.
   if (!shown) {
-    restoreContent();
+    if (changed) {
+      restoreContent();
+    }
     btn.disabled = origDisabled;
     restoreFocus();
     delete btn.dataset["asyncStatus"];
@@ -252,18 +274,24 @@ export async function withAsyncFeedback(
   if (reset <= 0) {
     btn.disabled = origDisabled;
     restoreFocus();
+    held.set(btn, restoreContent);
     return;
   }
 
-  const timerId = setTimeout(() => {
-    resetTimers.delete(btn);
-    if (!btn.isConnected) {
-      return;
-    }
+  const finish = (): void => {
     restoreContent();
     btn.disabled = origDisabled;
-    restoreFocus();
     delete btn.dataset["asyncStatus"];
+  };
+  // A button the app removed during the hold is restored too, in case it is
+  // put back; restoreFocus does nothing while it is out of the document.
+  const timerId = setTimeout(() => {
+    held.delete(btn);
+    finish();
+    restoreFocus();
   }, reset);
-  resetTimers.set(btn, timerId);
+  held.set(btn, () => {
+    clearTimeout(timerId);
+    finish();
+  });
 }

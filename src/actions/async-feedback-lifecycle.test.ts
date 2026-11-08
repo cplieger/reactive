@@ -108,7 +108,7 @@ describe("withAsyncFeedback — button removed from the DOM", () => {
     expect(btn.dataset["asyncStatus"]).toBe("success");
   });
 
-  it("leaves a detached button untouched when its reset comes due", async () => {
+  it("restores a detached button when its reset comes due, so a re-attached one works", async () => {
     const btn = appendButton("Save");
 
     await withAsyncFeedback(btn, () => Promise.resolve());
@@ -117,6 +117,26 @@ describe("withAsyncFeedback — button removed from the DOM", () => {
     btn.remove();
     vi.advanceTimersByTime(1200);
 
-    expect(btn.dataset["asyncStatus"]).toBe("success");
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe("Save");
+  });
+
+  it("gives a button removed mid-flight its content back, enabled", async () => {
+    const btn = appendButton("Save");
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+
+    const cycle = withAsyncFeedback(btn, () => gate);
+    expect(btn.disabled).toBe(true);
+    btn.remove();
+    release();
+    await cycle;
+
+    expect(btn.disabled).toBe(false);
+    expect(btn.textContent).toBe("Save");
+    expect(btn.querySelector(".btn-async-spinner")).toBeNull();
   });
 });
