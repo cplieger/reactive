@@ -103,7 +103,9 @@ function safeSuffix(path: string): string {
     .map((segment) => {
       const dotLike = segment.replace(/%2e/gi, ".");
       if (dotLike === "." || dotLike === "..") {
-        return segment.replace(/\./g, "%2E").replace(/%/g, "%25");
+        // Each dot, plain or already encoded as %2E, becomes %252E in one
+        // step: the parser pops a %2E segment, never a %252E one.
+        return dotLike.replace(/\./g, "%252E");
       }
       return segment;
     })
