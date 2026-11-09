@@ -992,6 +992,26 @@ describe("withAsyncFeedback — fragment renderers and a moved child", () => {
     expect(btn.dataset["asyncStatus"]).toBeUndefined();
   });
 
+  it.each([0, 1200])(
+    "a former child whose shadow root now holds the button does not stop it (resetMs %i)",
+    async (resetMs) => {
+      const btn = makeButton("<div>Save</div>");
+      const host = btn.firstElementChild as HTMLElement;
+      const shadow = host.attachShadow({ mode: "open" });
+
+      await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs });
+      shadow.append(btn);
+      document.body.append(host);
+      expect(() => vi.advanceTimersByTime(1200)).not.toThrow();
+
+      const next = vi.fn(() => Promise.resolve());
+      await expect(withAsyncFeedback(btn, next)).resolves.toBeUndefined();
+      vi.advanceTimersByTime(1200);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(btn.disabled).toBe(false);
+    },
+  );
+
   it("with resetMs 0, a former child that now wraps the button does not stop the next call", async () => {
     const btn = makeButton("<span>Save</span>");
     const label = btn.firstElementChild as HTMLElement;

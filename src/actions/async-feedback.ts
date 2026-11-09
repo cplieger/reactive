@@ -42,6 +42,19 @@ const defaultRenderSuccess = (): Node =>
   glyph([["stroke-linejoin", "round"]], "polyline", [["points", "20 6 9 17 4 12"]]);
 const defaultRenderError = (): Node => glyph([], "path", [["d", "M18 6L6 18M6 6l12 12"]]);
 
+/** Whether `node` is a shadow-including ancestor of `of`, the relation the
+ *  DOM checks before it lets `replaceChildren` move a node into `of`.
+ *  `Node.contains` stops at a shadow root. */
+function wraps(node: Node, of: Node): boolean {
+  for (let at: Node | null = of; at !== null;) {
+    if (at === node) {
+      return true;
+    }
+    at = at.parentNode ?? (at instanceof ShadowRoot ? at.host : null);
+  }
+  return false;
+}
+
 /** A fragment empties into the button and leaves nothing to track, so its
  *  nodes go into one wrapper that lays out as if it were not there. */
 function asOneNode(node: Node): Node {
@@ -215,7 +228,7 @@ export async function withAsyncFeedback(
     } else if (
       shownNode !== null &&
       shownNode.parentNode === btn &&
-      !origNodes.some((n) => n.contains(btn))
+      !origNodes.some((n) => wraps(n, btn))
     ) {
       btn.replaceChildren(...origNodes);
     }
