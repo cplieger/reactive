@@ -1,25 +1,22 @@
 # reactive
 
-> Moved into [`@cplieger/ui`](https://github.com/cplieger/ui): import `@cplieger/ui/signal` and `@cplieger/ui/dom` instead, as the [migration guide](https://github.com/cplieger/ui/blob/main/docs/migrating.md) shows.
-> **Archived 2026-11-04. This repository is read-only. The published package stays available.**
-
 [![npm](https://img.shields.io/npm/v/@cplieger/reactive)](https://www.npmjs.com/package/@cplieger/reactive) [![JSR](https://jsr.io/badges/@cplieger/reactive)](https://jsr.io/@cplieger/reactive) [![Mutation (TS)](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/cplieger/reactive/badges/mutation-ts.json)](https://github.com/cplieger/reactive/issues?q=label%3Astryker-tracker)
 
-reactive lets you build a framework-free TypeScript browser UI with signals, keyed list rendering and in-place DOM updates, in one package with no runtime dependencies.
+`@cplieger/reactive` lets you build a TypeScript browser app without a framework, from signals, keyed DOM rendering, typed JSON requests and server actions.
 
-It replaces the change listeners, list re-renders and element builder you would otherwise write between state and the page. It ships as ESM TypeScript source rather than compiled JavaScript, so it needs a bundler or runtime that compiles TypeScript. Releases follow semantic versioning, and it is licensed under Apache-2.0.
+It replaces the change listeners, list re-renders, `try`/`catch` blocks and loading flags you would otherwise write between state, the server and the page. It has no runtime dependencies and ships as ESM-only TypeScript source, so it needs a bundler or runtime that compiles TypeScript 6 or later. It ships no widgets, icons or stylesheets; those are in [`@cplieger/ui`](https://github.com/cplieger/ui). It is licensed under Apache-2.0.
 
 ## Why use it
 
-reactive is built for a small browser app in plain TypeScript that needs no component framework.
+`@cplieger/reactive` is built for apps that draw their interface with plain DOM code.
 
-- Signals, computed values and effects track their dependencies on their own. When a write returns, every effect that depends on it has already run, except those still running, which each finish before any re-run they need.
-- `createCollection` and `bindList` render a keyed list. Changing one item repaints only its row, and a reorder keeps the existing rows.
-- `createRoot` disposes a view's effects at once, and `resource` loads async data without painting a late answer over the next view.
-- `el` builds elements without HTML strings, so it works under a strict Content Security Policy. `patch` updates a subtree by reusing the elements on the page, so focus and scroll position survive a re-render.
-- The signals, stores, collections and event bus need no DOM, so they also run under Node, Deno, Bun or Workers.
+- A signal write runs every effect that depends on it before it returns, and every subpath shares that one signal graph.
+- `createCollection` and `bindList` render a keyed list: a changed item repaints only its row, and a reorder keeps the existing rows.
+- `el` builds elements without HTML strings, and `patch` updates a subtree in place, so focus and scroll position survive a re-render.
+- Requests never throw, and actions add optimistic updates, rollback and retry for failures you mark as transient.
+- No subpath touches the DOM at import, so each one loads under Node, Deno, Bun or Workers.
 
-Consider [Solid](https://github.com/solidjs/solid) if you want a full UI framework, with components, JSX, Suspense for async data and server-side rendering.
+Consider [Solid](https://github.com/solidjs/solid) if you want components, JSX and server-side rendering. Consider [TanStack Query](https://tanstack.com/query/latest) if you also need a server-state cache.
 
 ## Install
 
@@ -31,158 +28,114 @@ npm i @cplieger/reactive
 
 ## Usage
 
-A signal holds a value, a computed value derives from signals, and an effect re-runs when what it read changes:
+A signal holds a value, and an effect re-runs when what it read changes. `el` builds the elements:
 
 ```typescript
-import { signal, computed, effect, batch } from "@cplieger/reactive";
+import { effect, el, signal } from "@cplieger/reactive";
 
 const count = signal(0);
-const doubled = computed(() => count.value * 2);
-
-const dispose = effect(() => {
-  console.log(count.value, doubled.value);
-  return undefined; // an effect returns undefined or a cleanup function
-});
-
-batch(() => {
-  count.value = 1;
-  count.value = 2;
-}); // the effect ran once, with 2 and 4, before batch returned
-
-dispose();
-```
-
-A collection and `bindList` render a list. Updating one item repaints only its row:
-
-```typescript
-import { bindList, createCollection, el } from "@cplieger/reactive";
-
-interface Todo {
-  id: string;
-  title: string;
-  done: boolean;
-}
-
-const todos = createCollection<Todo>((todo) => todo.id);
-const list = el("ul");
-document.body.append(list);
-
-bindList(list, todos, {
-  mount: () => el("li"),
-  update: (row, todo) => {
-    row.textContent = todo.done ? `${todo.title} (done)` : todo.title;
-  },
-});
-
-todos.setAll([
-  { id: "a", title: "Write docs", done: false },
-  { id: "b", title: "Ship", done: false },
-]);
-todos.update("a", (todo) => ({ ...todo, done: true })); // only the first row repaints
-```
-
-`patch` takes freshly built elements and applies them to a subtree, keeping the elements already on the page:
-
-```typescript
-import { effect, el, patch, signal } from "@cplieger/reactive";
-
-const name = signal("world");
-const header = el("header");
-document.body.append(header);
+const label = el("output");
+const button = el("button", { onclick: () => count.value++ }, "Add one");
+document.body.append(button, label);
 
 effect(() => {
-  patch(header, el("h1", { className: "title" }, `Hello, ${name.value}`));
-  return undefined;
+  label.textContent = `Clicked ${count.value} times`;
 });
-
-name.value = "reactive"; // the same <h1> stays on the page with its new text
 ```
 
-`createRoot` owns what a view starts, and `resource` loads data for it. Disposing the root aborts the request, and a late answer writes nothing:
+Connect your notifications to the actions once at startup, then define each action at module scope and dispatch it from your event handlers:
 
 ```typescript
-import { createRoot, effect, el, resource, signal } from "@cplieger/reactive";
+import { apiAction, configure, retryNetwork } from "@cplieger/reactive/actions";
 
-const id = signal("a");
-const view = el("p");
-document.body.append(view);
+// Your app's own notifications, such as @cplieger/ui's toasts.
+configure({ success: notifySuccess, error: notifyError });
 
-const dispose = createRoot((dispose) => {
-  const item = resource(
-    () => id.value,
-    (value, signal) => fetch(`/items/${value}`, { signal }).then((res) => res.text()),
-  );
-  effect(() => {
-    const s = item.value;
-    view.textContent = s.state === "ready" ? s.data : s.state;
-  });
-  return dispose;
+const deleteItem = apiAction<string>({
+  name: "items.delete",
+  request: (id) => ({ method: "DELETE", path: `/api/items/${id}` }),
+  error: "Could not delete the item",
+  retryable: retryNetwork,
+  retry: { count: 2, delay: 300 },
 });
 
-id.value = "b"; // the request for "a" is aborted and its answer is dropped
-dispose();
+await deleteItem.dispatch("item-1"); // the result, or null after the error notification
 ```
+
+To call a JSON API directly, create one instance per backend and branch on the result:
+
+```typescript
+import { createFetch } from "@cplieger/reactive/fetch";
+
+const api = createFetch({ baseUrl: "https://api.example.com/v1" });
+
+const res = await api.apiGetRaw<{ name: string }>("/users/me");
+if (res.ok) console.log(res.data.name);
+else console.error(res.status, res.code, res.error);
+```
+
+## Subpaths
+
+Import each part from its own subpath. Code that imports these from `@cplieger/ui` 1.x moves by the table in [Moving to reactive 2.4](docs/migrating.md).
+
+| Import from | What it holds |
+| --- | --- |
+| `@cplieger/reactive` | everything in `/signal` and `/dom` |
+| `@cplieger/reactive/signal` | signals, computed values, effects, owners, resources, stores, collections and the event bus |
+| `@cplieger/reactive/dom` | `el`, `reconcile`, `bindList`, `patch` and `trackHandler` |
+| `@cplieger/reactive/fetch` | typed JSON requests |
+| `@cplieger/reactive/actions` | server actions |
+| `@cplieger/reactive/actions/testing` | `resetActionFramework` for tests |
+
+`package.json` sets `"sideEffects": false`, so a bundler drops every subpath you do not import.
 
 ## API
 
-- Signals: `signal`, `computed`, `effect`, `batch`, `untracked`, `touch`, `on`, `subscribe`, `isSignal`, `isComputed` and `setEffectErrorHandler`.
-- Ownership and async: `createRoot` and `runWithOwner` for owners that dispose a tree of effects, and `resource` for async data as a `Loadable`.
-- State: `createStore` for a fixed set of typed keys, `SignalMap` for keys known only at run time, and `createCollection` for an ordered list of keyed items.
-- DOM: `el` builds elements, `reconcile` and `bindList` render keyed lists, and `patch` updates a subtree in place. `trackHandler` registers an `on*` handler on an element you built without `el`, so `patch` keeps it in step.
-- Events: `createBus` for typed events that hold no value.
+- Signals, from `/signal` or the root: `signal`, `computed`, `effect`, `batch`, `untracked`, `touch`, `on`, `subscribe`, `isSignal`, `isComputed`, `setEffectErrorHandler`, `createRoot`, `runWithOwner` and `resource`.
+- State, from `/signal` or the root: `createStore`, `SignalMap`, `createCollection` and `createBus`.
+- DOM, from `/dom` or the root: `el`, `reconcile`, `KEY_ATTR`, `bindList`, `patch` and `trackHandler`.
+- Requests, from `/fetch`: `createFetch` with its `apiGet`, `apiPost`, `apiPut`, `apiPatch` and `apiDelete` helpers, `withTimeout` and `API_TIMEOUT_MS`.
+- Actions, from `/actions`: `configure`, `configureApi`, `configureTransport`, `defineAction`, `apiAction`, `transportAction`, the errors and retry policy `ActionError`, `hasErrorString`, `classifyFetchError`, `retryNetwork` and `RETRY_STANDARD`, the idempotency names `IDEMPOTENCY_HEADER` and `IDEMPOTENCY_COMMAND_FIELD`, the helpers `debouncedDispatch`, `pollAction`, `pollUntil`, `bindLoadingState`, `withAsyncFeedback` and `registerCleanup`, and the state reads `isPending`, `pendingCount`, `subscribeToActions`, `subscribeByName` and `getActionLog`.
 
-The full reference is on [JSR](https://jsr.io/@cplieger/reactive/doc). [Signals, stores and collections](docs/signals.md) and [Building and updating the DOM](docs/dom.md) describe how each one behaves.
+The full reference, generated from the doc comments, is on [JSR](https://jsr.io/@cplieger/reactive/doc).
 
 ## A write runs its effects before it returns
 
 When `count.value = 1` returns, every effect that depends on `count` has already run, so the next line reads the DOM those effects wrote. There is no queue and no pending state to wait for.
 
-`batch(fn)` is the only way to defer. Writes inside it coalesce, and the held effects run once, synchronously, when the outermost batch returns, even when the body throws. To run effects on a later task, make the write on a later task:
+`batch(fn)` is the only way to defer. Writes inside it coalesce, and the held effects run once, synchronously, when the outermost batch returns, even when the body throws. To run effects on a later task, make the write on a later task. [Signals, stores and collections](docs/signals.md) has the full rules.
 
-```typescript
-queueMicrotask(() => {
-  count.value = next; // effects run inside this microtask
-});
-```
+## Server text is untrusted
 
-This is the contract [@preact/signals-core](https://github.com/preactjs/signals/blob/main/packages/core/README.md) documents too. The package has no `flushSync()` or `nextTick()`, because it never holds work, so there is nothing to flush.
+- With an absolute `baseUrl`, a request path cannot reach another origin. Without one, the path goes to `fetch()` unchanged, so never build a whole path from untrusted text.
+- An error message can carry text from the server's response. Your `configure` adapter renders it as text, never as HTML.
+- A failed response's `body` and `code` come from the server. Check their shape and the `status` before you act on them.
+- Set `sensitive: true` on an action whose arguments or result carry a secret, a token or personal data, so the action log keeps none of them.
 
-## Correctness guarantees
-
-- Effects downstream of a `computed` run only when its value changes, compared with `Object.is` unless you pass `equals`. A diamond-shaped dependency graph never shows a half-updated value.
-- Reading a `computed` while it is computing throws `Error("Cycle detected")`.
-- When a computed function throws, every read rethrows that error until a dependency changes.
-- Setting `.value` on a `computed` throws `Error("Cannot set a computed signal")`.
-- `batch()` runs the held effects synchronously at the end of the outermost batch, as @preact/signals-core and solid-js do.
+[Base URLs and untrusted responses](docs/security-model.md) and [Sensitive actions](docs/lifecycle.md#sensitive-actions) cover each rule.
 
 ## Unsupported by design
 
-The package leaves these out on purpose. [Non-goals](docs/non-goals.md) gives the reason for each.
-
-- Ownership outside a root, and a public `getOwner()`.
-- Lazy activation and an `onMount` lifecycle.
-- `Signal.subtle.Watcher` and notify-on-dirty.
-- Introspection APIs, and explicit disposal of a computed.
-- Server-side rendering and per-request isolation.
-- Suspense, or a resource that throws while loading.
-- Transactions, a custom scheduler, and a flush barrier such as `flushSync` or `nextTick`.
-- Controlled form inputs. `patch` syncs form values, so if a view can re-render while a user types, drive that field from an effect instead.
-- Writing a signal from inside a computed. The computed's own subscribers are not woken, so make that write in an effect.
+- The signal and DOM modules leave out ownership outside a root, an `onMount` lifecycle, server-side rendering, Suspense, a custom scheduler, a flush barrier such as `flushSync`, and controlled form inputs. [What the signal and DOM modules leave out](docs/signal-non-goals.md) gives the reasons.
+- The fetch module leaves out retries, interceptor chains, response caching, global settings and streamed responses. [What the fetch module leaves out](docs/fetch-non-goals.md) gives the reasons.
+- The actions module leaves out a query cache, framework adapters, a throttle helper and batch dispatch. [What the actions module leaves out](docs/actions-non-goals.md) gives the reasons.
 
 ## Documentation
 
-- [Signals, stores and collections](docs/signals.md) covers the flush model, effects, owners, resources, stores, collections and the event bus, for a reader writing state code.
-- [Building and updating the DOM](docs/dom.md) covers how `el`, `reconcile`, `bindList` and `patch` decide what to keep, for a reader rendering with them.
-- [Non-goals](docs/non-goals.md) lists what the package leaves out and why.
+- [Signals, stores and collections](docs/signals.md) and [Building and updating the DOM](docs/dom.md) give the exact rules of `/signal` and `/dom`.
+- [Results and errors](docs/results.md), [Requests, timeouts and runtimes](docs/requests.md) and [Base URLs and untrusted responses](docs/security-model.md) cover `/fetch`.
+- [Dispatch lifecycle](docs/lifecycle.md), [HTTP and streaming actions](docs/http.md) and [UI and polling helpers](docs/helpers.md) cover `/actions`.
+- [Moving to reactive 2.4](docs/migrating.md) maps each import from `@cplieger/ui` 1.x and lists what changed since reactive 2.3.
 
 ## Credits
 
 - The signal engine follows the design of [@preact/signals-core](https://github.com/preactjs/signals) in its dependency graph, its glitch-free computed refresh, its run-on-write effects and its untracked `subscribe` callback.
 - The `on()` helper follows [Solid](https://github.com/solidjs/solid)'s `on()`, and `untracked()` is Solid's `untrack()` under the name Preact gives it. `createRoot`, `runWithOwner` and owned nested effects follow Solid's ownership model.
+- `onSuccess`, `onError` and `onSettled` follow TanStack Query's mutation callbacks, and `configureApi` follows RTK Query's `fetchBaseQuery`.
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Disclaimer
 

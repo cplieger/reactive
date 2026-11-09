@@ -1,12 +1,24 @@
 {
   "name": "@cplieger/reactive",
-  "version": "1.0.0",
+  "version": "0.0.0",
   "license": "Apache-2.0",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./signal": "./src/signal/index.ts",
+    "./dom": "./src/dom/index.ts",
+    "./fetch": "./src/fetch/index.ts",
+    "./actions": "./src/actions/index.ts",
+    "./actions/testing": "./src/actions/testing.ts"
   },
   "publish": {
-    "include": ["LICENSE", "NOTICE", "README.md", "THIRD_PARTY_NOTICES.md", "src/**/*.ts"],
-    "exclude": ["src/**/*.test.ts"]
+    "include": [
+      "LICENSE",
+      "NOTICE",
+      "README.md",
+      "THIRD_PARTY_NOTICES.md",
+      "src/**/*.ts",
+      "jsr.json"
+    ],
+    "exclude": ["src/**/*.test.ts", "src/**/*-setup.ts", "src/**/test-helpers/**"]
   }
 }

@@ -1,0 +1,1030 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+
+import { withAsyncFeedback } from "./async-feedback.js";
+import { blurredOff } from "./test-helpers/focus.js";
+
+function makeButton(html = "Click me"): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.innerHTML = html;
+  document.body.replaceChildren(btn);
+  return btn;
+}
+
+// Runs first on purpose: a later makeButton() call replaces <body> and
+// detaches the lazily-created live region, so this must run before any eviction.
+describe("withAsyncFeedback — live region announce", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("announces the success message via an sr-only live region by default", async () => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    document.body.appendChild(btn); // append, do not evict
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(50);
+
+    const region = document.querySelector(".sr-only");
+    expect(region).not.toBeNull();
+    expect(region?.getAttribute("aria-live")).toBe("polite");
+    expect(region?.getAttribute("aria-atomic")).toBe("true");
+    expect(region?.textContent).toBe("Action completed");
+    // Hidden by its own inline styles, so a page with no .sr-only rule shows nothing.
+    const style = (region as HTMLElement).style;
+    expect([style.position, style.width, style.height, style.overflow, style.clipPath]).toEqual([
+      "absolute",
+      "1px",
+      "1px",
+      "hidden",
+      "inset(50%)",
+    ]);
+    vi.advanceTimersByTime(1200);
+  });
+});
+
+describe("withAsyncFeedback — default glyphs", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("shows pending state immediately and disables the button", async () => {
+    const btn = makeButton();
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const promise = withAsyncFeedback(btn, () => work);
+
+    expect(btn.dataset["asyncStatus"]).toBe("pending");
+    expect(btn.disabled).toBe(true);
+    expect(btn.getAttribute("aria-busy")).toBe("true");
+    expect(btn.querySelector(".btn-async-spinner")).not.toBeNull();
+
+    resolveFn!();
+    await promise;
+  });
+
+  it("transitions to success when fn resolves; reverts after resetMs", async () => {
+    const btn = makeButton("<span>Original</span>");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    expect(btn.querySelector(".btn-async-glyph")).not.toBeNull();
+    expect(btn.innerHTML).toContain("polyline");
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.disabled).toBe(false);
+    expect(btn.innerHTML).toBe("<span>Original</span>");
+    expect(btn.getAttribute("aria-busy")).toBeNull();
+  });
+
+  it("transitions to error when fn throws; reverts after resetMs", async () => {
+    const btn = makeButton("Original");
+    await withAsyncFeedback(btn, () => Promise.reject(new Error("fail")));
+
+    expect(btn.dataset["asyncStatus"]).toBe("error");
+    expect(btn.innerHTML).toContain("M18 6L6 18");
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.disabled).toBe(false);
+    expect(btn.innerHTML).toBe("Original");
+  });
+
+  it("ignores re-entrant calls while pending", async () => {
+    const btn = makeButton();
+    const fn = vi.fn(() => new Promise<void>((res) => setTimeout(res, 100)));
+
+    const first = withAsyncFeedback(btn, fn);
+    const second = withAsyncFeedback(btn, fn);
+    const third = withAsyncFeedback(btn, fn);
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.all([first, second, third]);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves the original disabled state after reset", async () => {
+    const btn = makeButton();
+    btn.disabled = true; // started disabled
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("restores a pre-existing aria-busy attribute instead of removing it", async () => {
+    const btn = makeButton();
+    btn.setAttribute("aria-busy", "true");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    expect(btn.getAttribute("aria-busy")).toBe("true");
+    vi.advanceTimersByTime(1200);
+    expect(btn.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("respects a custom resetMs", async () => {
+    const btn = makeButton();
+    await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs: 50 });
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    vi.advanceTimersByTime(49);
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    vi.advanceTimersByTime(2);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("with keepLabel renders the spinner alongside the original content", async () => {
+    const btn = makeButton("Clone");
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const promise = withAsyncFeedback(btn, () => work, { keepLabel: true });
+
+    expect(btn.querySelector(".btn-async-spinner")).not.toBeNull();
+    expect(btn.textContent).toContain("Clone");
+
+    resolveFn!();
+    await promise;
+  });
+
+  it("when the button is removed from the DOM mid-flight, no error and no glyph", async () => {
+    const btn = makeButton();
+    const work = Promise.resolve();
+    btn.remove();
+    await expect(withAsyncFeedback(btn, () => work)).resolves.toBeUndefined();
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.getAttribute("aria-busy")).toBeNull();
+    expect(btn.querySelector(".btn-async-glyph")).toBeNull();
+  });
+});
+
+describe("withAsyncFeedback — injectable glyphs", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("uses a custom renderSuccess when provided (default glyph not used)", async () => {
+    const btn = makeButton();
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      renderSuccess: () => {
+        const s = document.createElement("span");
+        s.className = "icon icon-check";
+        return s;
+      },
+    });
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    expect(btn.querySelector(".icon-check")).not.toBeNull();
+    expect(btn.querySelector(".btn-async-glyph")).toBeNull();
+    vi.advanceTimersByTime(1200);
+  });
+
+  it("uses a custom renderError on rejection (default glyph not used)", async () => {
+    const btn = makeButton();
+    await withAsyncFeedback(btn, () => Promise.reject(new Error("x")), {
+      renderError: () => {
+        const s = document.createElement("span");
+        s.className = "icon icon-close";
+        return s;
+      },
+    });
+    expect(btn.dataset["asyncStatus"]).toBe("error");
+    expect(btn.querySelector(".icon-close")).not.toBeNull();
+    expect(btn.querySelector(".btn-async-glyph")).toBeNull();
+    vi.advanceTimersByTime(1200);
+  });
+
+  it("uses a custom renderPending node for the pending state", async () => {
+    const btn = makeButton();
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const promise = withAsyncFeedback(btn, () => work, {
+      renderPending: () => {
+        const s = document.createElement("span");
+        s.className = "custom-spinner";
+        return s;
+      },
+    });
+    expect(btn.querySelector(".custom-spinner")).not.toBeNull();
+    expect(btn.querySelector(".btn-async-spinner")).toBeNull();
+    resolveFn!();
+    await promise;
+    vi.advanceTimersByTime(1200);
+  });
+});
+
+describe("withAsyncFeedback — target slot + persist", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function mk(cls: string): HTMLElement {
+    const s = document.createElement("span");
+    s.className = cls;
+    return s;
+  }
+
+  function makeIconButton(): {
+    btn: HTMLButtonElement;
+    icon: HTMLSpanElement;
+    label: HTMLSpanElement;
+  } {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    const icon = document.createElement("span");
+    icon.className = "icon";
+    const label = document.createElement("span");
+    label.textContent = " Label";
+    btn.append(icon, label);
+    document.body.replaceChildren(btn);
+    return { btn, icon, label };
+  }
+
+  it("replaces only the target slot, preserves the label, restores the original slot on reset", async () => {
+    const { btn, icon, label } = makeIconButton();
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const promise = withAsyncFeedback(btn, () => work, {
+      target: icon,
+      renderPending: () => mk("pending-slot"),
+      renderSuccess: () => mk("success-slot"),
+    });
+
+    expect(btn.querySelector(".pending-slot")).not.toBeNull();
+    expect(btn.contains(icon)).toBe(false);
+    expect(btn.contains(label)).toBe(true);
+    expect(label.textContent).toBe(" Label");
+    expect(btn.children.length).toBe(2);
+    expect(btn.dataset["asyncStatus"]).toBe("pending");
+
+    resolveFn!();
+    await promise;
+
+    expect(btn.querySelector(".success-slot")).not.toBeNull();
+    expect(btn.querySelector(".pending-slot")).toBeNull();
+    expect(btn.contains(label)).toBe(true);
+    expect(btn.children.length).toBe(2);
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+
+    vi.advanceTimersByTime(1200);
+
+    // Identity check: the exact original node is restored, not a clone.
+    expect(btn.children[0]).toBe(icon);
+    expect(btn.contains(icon)).toBe(true);
+    expect(btn.querySelector(".success-slot")).toBeNull();
+    expect(btn.contains(label)).toBe(true);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("target + resetMs:0 persists the outcome glyph and re-enables the button", async () => {
+    const { btn, icon, label } = makeIconButton();
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      target: icon,
+      resetMs: 0,
+      renderSuccess: () => mk("success-slot"),
+    });
+
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    expect(btn.querySelector(".success-slot")).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+
+    vi.advanceTimersByTime(5000);
+    expect(btn.querySelector(".success-slot")).not.toBeNull();
+    expect(btn.contains(icon)).toBe(false);
+    expect(btn.contains(label)).toBe(true);
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+  });
+
+  it("target mode error path swaps in the error node", async () => {
+    const { btn, icon } = makeIconButton();
+    await withAsyncFeedback(btn, () => Promise.reject(new Error("nope")), {
+      target: icon,
+      renderError: () => mk("error-slot"),
+      renderSuccess: () => mk("success-slot"),
+    });
+
+    expect(btn.dataset["asyncStatus"]).toBe("error");
+    expect(btn.querySelector(".error-slot")).not.toBeNull();
+    expect(btn.querySelector(".success-slot")).toBeNull();
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.contains(icon)).toBe(true);
+    expect(btn.querySelector(".error-slot")).toBeNull();
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("resetMs:0 on the whole-button path persists the glyph (no revert)", async () => {
+    const btn = makeButton("<span>Original</span>");
+    await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs: 0 });
+
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    expect(btn.querySelector(".btn-async-glyph")).not.toBeNull();
+    expect(btn.disabled).toBe(false);
+
+    vi.advanceTimersByTime(5000);
+    expect(btn.querySelector(".btn-async-glyph")).not.toBeNull();
+    expect(btn.innerHTML).not.toContain("Original");
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+  });
+
+  it("rejects re-entry while pending in target mode (fn once, no double swap)", async () => {
+    const { btn, icon } = makeIconButton();
+    const fn = vi.fn(() => new Promise<void>((res) => setTimeout(res, 100)));
+
+    const first = withAsyncFeedback(btn, fn, {
+      target: icon,
+      renderPending: () => mk("pending-slot"),
+    });
+    const second = withAsyncFeedback(btn, fn, {
+      target: icon,
+      renderPending: () => mk("pending-slot"),
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(btn.querySelectorAll(".pending-slot").length).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(100);
+    await Promise.all([first, second]);
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it("regression: whole-button default path still replaceChildren + reverts", async () => {
+    const btn = makeButton("<span>Original</span>");
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      renderSuccess: () => mk("success-slot"),
+    });
+
+    expect(btn.children.length).toBe(1);
+    expect(btn.querySelector(".success-slot")).not.toBeNull();
+    expect(btn.textContent).not.toContain("Original");
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    // Persist (resetMs:0) diverges from this: disabled here until reset.
+    expect(btn.disabled).toBe(true);
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.innerHTML).toBe("<span>Original</span>");
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("persist (resetMs:0) re-enables the button and allows a subsequent dispatch", async () => {
+    const btn = document.createElement("button");
+    document.body.append(btn);
+    let runs = 0;
+    await withAsyncFeedback(
+      btn,
+      async () => {
+        runs += 1;
+      },
+      { resetMs: 0 },
+    );
+    expect(runs).toBe(1);
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    await withAsyncFeedback(
+      btn,
+      async () => {
+        runs += 1;
+      },
+      { resetMs: 0 },
+    );
+    expect(runs).toBe(2);
+    btn.remove();
+  });
+});
+
+describe("withAsyncFeedback — focus restore", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("restores focus to a focused button after the timed reset re-enables it", async () => {
+    const btn = makeButton();
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const blurred = blurredOff(btn);
+    const promise = withAsyncFeedback(btn, () => work);
+
+    // The browser drops focus off a disabled element by itself.
+    await blurred;
+    expect(document.activeElement).not.toBe(btn);
+
+    resolveFn!();
+    await promise;
+
+    expect(btn.disabled).toBe(true);
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.disabled).toBe(false);
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("restores focus via the persist path (resetMs:0)", async () => {
+    const btn = makeButton();
+    btn.focus();
+
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const blurred = blurredOff(btn);
+    const promise = withAsyncFeedback(btn, () => work, { resetMs: 0 });
+
+    await blurred;
+    expect(document.activeElement).not.toBe(btn);
+
+    resolveFn!();
+    await promise;
+
+    expect(btn.disabled).toBe(false);
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("does not steal focus back when it moved to another element during the cycle", async () => {
+    const btn = makeButton();
+    const other = document.createElement("input");
+    document.body.appendChild(other);
+    btn.focus();
+    expect(document.activeElement).toBe(btn);
+
+    let resolveFn: (() => void) | undefined;
+    const work = new Promise<void>((res) => {
+      resolveFn = res;
+    });
+    const promise = withAsyncFeedback(btn, () => work);
+
+    other.focus();
+    expect(document.activeElement).toBe(other);
+
+    resolveFn!();
+    await promise;
+    vi.advanceTimersByTime(1200);
+
+    expect(document.activeElement).toBe(other);
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("does not grab focus for a button that was never focused", async () => {
+    const btn = makeButton();
+    const other = document.createElement("input");
+    document.body.appendChild(other);
+    other.focus();
+    expect(document.activeElement).toBe(other);
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    expect(document.activeElement).toBe(other);
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("does not grab focus when never focused even if nothing else holds focus", async () => {
+    // Isolates `hadFocus`: activeElement is <body> here (restore-eligible), so
+    // only hadFocus stops the steal. The sibling "moved to another element"
+    // test can't isolate this — its activeElement check blocks regardless.
+    const btn = makeButton();
+    expect(document.activeElement).toBe(document.body);
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    expect(btn.disabled).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+});
+
+describe("withAsyncFeedback — Trusted Types and throwing renderers", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Run `body` with innerHTML assignment refused, as a page that enforces
+   *  Trusted Types refuses a plain string. */
+  async function withoutInnerHTML(body: () => Promise<void>): Promise<void> {
+    const desc = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
+    if (desc === undefined) throw new Error("no innerHTML descriptor");
+    Object.defineProperty(Element.prototype, "innerHTML", {
+      ...desc,
+      set() {
+        throw new TypeError("This document requires 'TrustedHTML' assignment.");
+      },
+    });
+    try {
+      await body();
+    } finally {
+      Object.defineProperty(Element.prototype, "innerHTML", desc);
+    }
+  }
+
+  it("builds its default glyphs without innerHTML", async () => {
+    const ok = makeButton("Original");
+    const failed = document.createElement("button");
+    failed.type = "button";
+    failed.append("Original");
+    document.body.append(failed);
+    await withoutInnerHTML(async () => {
+      await withAsyncFeedback(ok, () => Promise.resolve());
+      await withAsyncFeedback(failed, () => Promise.reject(new Error("fail")));
+    });
+
+    expect(ok.querySelector("svg.btn-async-glyph polyline")?.getAttribute("points")).toBe(
+      "20 6 9 17 4 12",
+    );
+    expect(failed.querySelector("svg.btn-async-glyph path")?.getAttribute("d")).toBe(
+      "M18 6L6 18M6 6l12 12",
+    );
+    expect(ok.querySelector("svg")?.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    vi.advanceTimersByTime(1200);
+    expect([ok.disabled, failed.disabled]).toEqual([false, false]);
+  });
+
+  it.each(["renderSuccess", "renderError"] as const)(
+    "a %s that throws resolves and gives the button back at once",
+    async (which) => {
+      const btn = makeButton("<span>Original</span>");
+      const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+      const fn =
+        which === "renderSuccess" ? () => Promise.resolve() : () => Promise.reject(new Error("x"));
+
+      await expect(
+        withAsyncFeedback(btn, fn, {
+          [which]: () => {
+            throw new Error("broken renderer");
+          },
+        }),
+      ).resolves.toBeUndefined();
+
+      expect(btn.disabled).toBe(false);
+      expect(btn.getAttribute("aria-busy")).toBeNull();
+      expect(btn.dataset["asyncStatus"]).toBeUndefined();
+      expect(btn.innerHTML).toBe("<span>Original</span>");
+      expect(logged).toHaveBeenCalledWith(
+        `[actions] withAsyncFeedback ${which} threw`,
+        expect.any(Error),
+      );
+
+      const next = vi.fn(() => Promise.resolve());
+      await withAsyncFeedback(btn, next);
+      expect(next).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("a renderPending that throws still runs the call", async () => {
+    const btn = makeButton("Original");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fn = vi.fn(() => Promise.resolve());
+
+    await withAsyncFeedback(btn, fn, {
+      renderPending: () => {
+        throw new Error("broken renderer");
+      },
+    });
+
+    expect(fn).toHaveBeenCalledTimes(1);
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+    vi.advanceTimersByTime(1200);
+    expect(btn.disabled).toBe(false);
+    expect(btn.innerHTML).toBe("Original");
+  });
+});
+
+describe("withAsyncFeedback — a cycle that starts while a glyph is up", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("takes the glyph down first, so the button comes back enabled with its content", async () => {
+    const btn = makeButton("<span>Original</span>");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    expect(btn.dataset["asyncStatus"]).toBe("success");
+
+    const second = vi.fn(() => Promise.resolve());
+    await withAsyncFeedback(btn, second);
+    expect(second).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(5000);
+    expect(btn.disabled).toBe(false);
+    expect(btn.innerHTML).toBe("<span>Original</span>");
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("with target and a persisted glyph, a second call that fails shows the cross", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), { target, resetMs: 0 });
+    expect(btn.querySelector("polyline")).not.toBeNull();
+
+    let fail!: (e: Error) => void;
+    const gate = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    const second = withAsyncFeedback(btn, () => gate, { target, resetMs: 0 });
+    expect(btn.querySelector(".btn-async-spinner")).not.toBeNull();
+    expect(btn.querySelector("polyline")).toBeNull();
+    fail(new Error("x"));
+    await second;
+
+    expect(btn.dataset["asyncStatus"]).toBe("error");
+    expect(btn.querySelector("path")?.getAttribute("d")).toBe("M18 6L6 18M6 6l12 12");
+    expect(btn.querySelector("polyline")).toBeNull();
+  });
+});
+
+describe("withAsyncFeedback — target renderers and throwing branches", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("with target, a renderer that returns a fragment is refused and the call still resolves", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+    const logged = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const fragment = (): Node => {
+      const f = document.createDocumentFragment();
+      f.append(document.createElement("i"));
+      return f;
+    };
+
+    await expect(
+      withAsyncFeedback(btn, () => Promise.resolve(), { target, renderSuccess: fragment }),
+    ).resolves.toBeUndefined();
+
+    expect(btn.firstElementChild).toBe(target);
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.querySelector("i")).toBeNull();
+    expect(logged).toHaveBeenCalledWith(
+      "[actions] withAsyncFeedback renderSuccess threw",
+      expect.any(TypeError),
+    );
+  });
+
+  it("with target, a renderError that throws puts the exact target node back", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withAsyncFeedback(btn, () => Promise.reject(new Error("x")), {
+      target,
+      renderError: () => {
+        throw new Error("broken renderer");
+      },
+    });
+
+    expect(btn.firstElementChild).toBe(target);
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("a focused button whose renderSuccess throws gets its focus back", async () => {
+    const btn = makeButton("Original");
+    btn.focus();
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let release!: () => void;
+    const work = new Promise<void>((res) => {
+      release = res;
+    });
+    const blurred = blurredOff(btn);
+
+    const cycle = withAsyncFeedback(btn, () => work, {
+      renderSuccess: () => {
+        throw new Error("broken renderer");
+      },
+    });
+    // The browser drops focus off a disabled element by itself.
+    await blurred;
+    expect(document.activeElement).not.toBe(btn);
+    release();
+    await cycle;
+
+    expect(document.activeElement).toBe(btn);
+  });
+
+  it("with resetMs 0, a renderSuccess that throws re-enables and clears the status", async () => {
+    const btn = makeButton("Original");
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      resetMs: 0,
+      renderSuccess: () => {
+        throw new Error("broken renderer");
+      },
+    });
+
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+    expect(btn.textContent).toBe("Original");
+  });
+
+  it("when no renderer inserts anything, the button keeps its own nodes", async () => {
+    const btn = makeButton("<span>Original</span>");
+    const label = btn.firstElementChild;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const broken = (): Node => {
+      throw new Error("broken renderer");
+    };
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), {
+      renderPending: broken,
+      renderSuccess: broken,
+    });
+
+    expect(btn.firstElementChild).toBe(label);
+    expect(btn.disabled).toBe(false);
+  });
+});
+
+describe("withAsyncFeedback — a live region that left the document", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("is rebuilt, so the next announcement is heard", async () => {
+    const first = makeButton();
+    await withAsyncFeedback(first, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    const second = makeButton(); // replaces <body>'s children, live region included
+    await withAsyncFeedback(second, () => Promise.reject(new Error("x")));
+    vi.advanceTimersByTime(50);
+
+    const regions = document.querySelectorAll('[aria-live="polite"]');
+    expect(regions.length).toBe(1);
+    expect(regions[0]?.isConnected).toBe(true);
+    expect(regions[0]?.textContent).toBe("Action failed");
+    vi.advanceTimersByTime(1200);
+  });
+});
+
+describe("withAsyncFeedback — the button's own nodes and the app's content", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("puts the same child nodes back, with their listeners", async () => {
+    const btn = makeButton();
+    const label = document.createElement("span");
+    label.textContent = "Save";
+    const clicks = vi.fn();
+    label.addEventListener("click", clicks);
+    btn.replaceChildren(label);
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    expect(btn.firstChild).toBe(label);
+    label.textContent = "Saved";
+    label.click();
+    expect(clicks).toHaveBeenCalledTimes(1);
+    expect(btn.textContent).toBe("Saved");
+  });
+
+  it("with resetMs 0, content the app wrote over the glyph is the next call's original", async () => {
+    const btn = makeButton("Before");
+    await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs: 0 });
+
+    const after = document.createElement("span");
+    after.textContent = "After";
+    btn.replaceChildren(after);
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    expect(btn.firstChild).toBe(after);
+    expect(btn.textContent).toBe("After");
+  });
+
+  it("content the app wrote during the timed hold stays", async () => {
+    const btn = makeButton("Before");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    btn.replaceChildren("After");
+
+    vi.advanceTimersByTime(1200);
+    expect(btn.textContent).toBe("After");
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it("a finished hold leaves no restore behind for a later call", async () => {
+    const btn = makeButton("Save");
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+
+    btn.disabled = true; // the app's own choice, after the cycle ended
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    expect(btn.disabled).toBe(true);
+  });
+
+  it("when renderPending throws and fn removes the button, its own child stays", async () => {
+    const btn = makeButton("<span>Original</span>");
+    const label = btn.firstElementChild;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await withAsyncFeedback(
+      btn,
+      () => {
+        btn.remove();
+        return Promise.resolve();
+      },
+      {
+        renderPending: () => {
+          throw new Error("broken renderer");
+        },
+      },
+    );
+
+    expect(btn.firstElementChild).toBe(label);
+    expect(btn.disabled).toBe(false);
+  });
+
+  it("with target, a renderPending that returns a fragment leaves the target in place", async () => {
+    const btn = makeButton('<span class="icon">i</span> Label');
+    const target = btn.querySelector<HTMLElement>(".icon")!;
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    let release!: () => void;
+    const work = new Promise<void>((res) => {
+      release = res;
+    });
+
+    const cycle = withAsyncFeedback(btn, () => work, {
+      target,
+      renderPending: () => document.createDocumentFragment(),
+    });
+    expect(btn.firstElementChild).toBe(target);
+    release();
+    await cycle;
+
+    expect(btn.querySelector("polyline")).not.toBeNull();
+    vi.advanceTimersByTime(1200);
+    expect(btn.firstElementChild).toBe(target);
+  });
+
+  it("a call during the timed hold keeps the focus the hold owed back", async () => {
+    const btn = makeButton("Save");
+    btn.focus();
+    const blurred = blurredOff(btn);
+    let release!: () => void;
+    const work = new Promise<void>((res) => {
+      release = res;
+    });
+    const first = withAsyncFeedback(btn, () => work);
+    await blurred;
+    release();
+    await first; // the glyph is up and the button is still disabled
+
+    const second = withAsyncFeedback(btn, () => Promise.resolve());
+    await second;
+    vi.advanceTimersByTime(1200);
+    expect(document.activeElement).toBe(btn);
+  });
+});
+
+describe("withAsyncFeedback — fragment renderers and a moved child", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const fragmentOf = (tag: string): (() => Node) => {
+    return () => {
+      const f = document.createDocumentFragment();
+      f.append(document.createElement(tag));
+      return f;
+    };
+  };
+
+  it("a renderSuccess that returns a fragment still gives the label back", async () => {
+    const btn = makeButton("<span>Save</span>");
+    const label = btn.firstElementChild;
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), { renderSuccess: fragmentOf("i") });
+    expect(btn.querySelector("i")).not.toBeNull();
+    vi.advanceTimersByTime(1200);
+
+    expect([...btn.childNodes]).toEqual([label]);
+  });
+
+  it.each([false, true])(
+    "a fragment from renderPending, then a throwing renderSuccess, leaves the label alone (keepLabel %s)",
+    async (keepLabel) => {
+      const btn = makeButton("<span>Save</span>");
+      const label = btn.firstElementChild;
+      vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+      await withAsyncFeedback(btn, () => Promise.resolve(), {
+        keepLabel,
+        renderPending: fragmentOf("b"),
+        renderSuccess: () => {
+          throw new Error("broken renderer");
+        },
+      });
+
+      expect([...btn.childNodes]).toEqual([label]);
+      expect(btn.disabled).toBe(false);
+    },
+  );
+
+  it("a former child that now wraps the button leaves the content and re-enables it", async () => {
+    const btn = makeButton("<span>Save</span>");
+    const label = btn.firstElementChild as HTMLElement;
+
+    await withAsyncFeedback(btn, () => Promise.resolve());
+    label.append(btn);
+    document.body.append(label);
+    expect(() => vi.advanceTimersByTime(1200)).not.toThrow();
+
+    expect(btn.disabled).toBe(false);
+    expect(btn.dataset["asyncStatus"]).toBeUndefined();
+  });
+
+  it.each([0, 1200])(
+    "a former child whose shadow root now holds the button does not stop it (resetMs %i)",
+    async (resetMs) => {
+      const btn = makeButton("<div>Save</div>");
+      const host = btn.firstElementChild as HTMLElement;
+      const shadow = host.attachShadow({ mode: "open" });
+
+      await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs });
+      shadow.append(btn);
+      document.body.append(host);
+      expect(() => vi.advanceTimersByTime(1200)).not.toThrow();
+
+      const next = vi.fn(() => Promise.resolve());
+      await expect(withAsyncFeedback(btn, next)).resolves.toBeUndefined();
+      vi.advanceTimersByTime(1200);
+      expect(next).toHaveBeenCalledTimes(1);
+      expect(btn.disabled).toBe(false);
+    },
+  );
+
+  it("with resetMs 0, a former child that now wraps the button does not stop the next call", async () => {
+    const btn = makeButton("<span>Save</span>");
+    const label = btn.firstElementChild as HTMLElement;
+
+    await withAsyncFeedback(btn, () => Promise.resolve(), { resetMs: 0 });
+    label.append(btn);
+    document.body.append(label);
+
+    const second = vi.fn(() => Promise.resolve());
+    await expect(withAsyncFeedback(btn, second)).resolves.toBeUndefined();
+    const third = vi.fn(() => Promise.resolve());
+    vi.advanceTimersByTime(1200);
+    await withAsyncFeedback(btn, third);
+    expect([second.mock.calls.length, third.mock.calls.length]).toEqual([1, 1]);
+  });
+});
