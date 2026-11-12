@@ -1,0 +1,249 @@
+/** Lifecycle status of a single dispatched action instance.
+ *
+ *  - `"pending"` — optimistic ran (if any), run() in flight
+ *  - `"success"` — run() resolved
+ *  - `"error"` — run() threw; rollback ran
+ *  - `"cancelled"` — action.cancel() called or signal aborted externally */
+export type ActionLifecycleStatus = "pending" | "success" | "error" | "cancelled";
+
+/** Errors thrown by an action's run() function. ActionError subclass
+ *  in error.ts attaches HTTP status + server error code metadata. */
+export interface ActionErrorLike {
+  readonly message: string;
+  /** HTTP status if applicable. */
+  readonly status?: number;
+  /** Server-side error code. */
+  readonly code?: string;
+  readonly cause?: unknown;
+}
+
+/** @internal The lifecycle fields every action-log record carries, sensitive
+ *  or not. Each is a number or a string the framework sets, so none can hold
+ *  a value from args, result or run(); a payload-bearing field belongs on the
+ *  non-sensitive arm of {@link ActionInstance}. */
+export interface ActionInstanceFields {
+  /** Unique per dispatch. */
+  readonly id: string;
+  /** Matches ActionDefinition.name. */
+  readonly name: string;
+  readonly status: ActionLifecycleStatus;
+  /** Date.now() when dispatch() was called. */
+  readonly dispatchedAt: number;
+  /** Date.now() when run() begins (after scope queue). */
+  readonly startedAt: number;
+  /** Date.now() at terminal state. */
+  readonly completedAt?: number;
+  /** Total run() invocations (1 = no retry; >1 = retries fired). */
+  readonly attempts?: number;
+}
+
+/** Snapshot of a single in-flight or historical action invocation, stored in
+ *  the registry log. A `sensitive` definition's records carry no `args`,
+ *  `result` or `error`; narrow on `sensitive` before reading `args`. */
+export type ActionInstance<TArgs = unknown, TResult = unknown> =
+  | (ActionInstanceFields & {
+      readonly sensitive?: never;
+      readonly args: TArgs;
+      /** Present iff status === "success". */
+      readonly result?: TResult;
+      /** Present iff status === "error". */
+      readonly error?: ActionErrorLike;
+    })
+  | (ActionInstanceFields & {
+      readonly sensitive: true;
+      readonly args?: never;
+      readonly result?: never;
+      readonly error?: never;
+    });
+
+/** Notification wiring: either a literal string (used as-is), or a function
+ *  computed from action args + result/error at call time. Pass false
+ *  to opt out of the default notification for that branch. */
+export type NotificationSpec<TArgs, TPayload> =
+  string | ((args: TArgs, payload: TPayload) => string) | false;
+
+/** Per-dispatch context passed to run() as the 3rd argument. Mostly
+ *  populated by the framework so adapters (apiAction, transportAction)
+ *  can read out values like the idempotency key without the caller
+ *  having to plumb them. */
+export interface ActionContext {
+  /** Stable identifier for this dispatch (matches the registry's
+   *  ActionInstance.id). */
+  readonly instanceID: string;
+  /** Set when ActionDefinition.idempotencyKey is configured. The
+   *  framework generates this once per dispatch (not per retry). */
+  readonly idempotencyKey?: string;
+}
+
+/** Configuration for automatic retry of transient failures. */
+export interface RetryConfig {
+  /** Additional attempts beyond the first (e.g. 2 = up to 3 total). */
+  readonly count: number;
+  /** Milliseconds before each retry. Number form: exponential backoff via
+   *  `delay × factor^(attempt-1)`, capped at 5s. Function form: full
+   *  control — receives the attempt number and the triggering error. */
+  readonly delay: number | ((attempt: number, err: ActionErrorLike) => number);
+  /** Backoff multiplier per retry. Default 2. Ignored when `delay` is a function. */
+  readonly factor?: number;
+}
+
+/** Standard retry config: 2 retries, 300ms initial delay. */
+export const RETRY_STANDARD: RetryConfig = { count: 2, delay: 300 } as const;
+
+/** Declarative description of an action, consulted on every dispatch. Only
+ *  `name` and `run` are required; function-valued members are re-evaluated
+ *  per dispatch. A throw from a callback, `rollback` or a notification spec
+ *  is logged and leaves the outcome unchanged; a throw from `optimistic`
+ *  fails the dispatch before run(), with code `"optimistic_failed"` unless
+ *  the error carries its own. */
+export interface ActionDefinition<TArgs, TResult, TOp = unknown> {
+  /** Stable identifier, e.g. "chat.delete", "files.create".
+   *  Used in the registry log + as a default notification prefix. */
+  readonly name: string;
+
+  /** The work the action performs. Must throw ActionError on failure
+   *  (or any Error — wrappers will normalise). */
+  run: (args: TArgs, signal: AbortSignal, ctx?: ActionContext) => Promise<TResult>;
+
+  /** Optional optimistic mutation. Runs synchronously before run(). */
+  optimistic?: (args: TArgs) => TOp | undefined;
+
+  /** Undo the optimistic mutation. Called on error OR cancellation (including a
+   *  cancellation that lands after run() resolves), never on success. The `err`
+   *  carries {code:'cancelled'} on the cancellation path. */
+  rollback?: (args: TArgs, op: TOp | undefined, err: ActionErrorLike) => void;
+
+  /** Notification on success. Default: no notification. */
+  success?: NotificationSpec<TArgs, TResult>;
+
+  /** Notification on error. Default: action name humanised + error message. */
+  error?: NotificationSpec<TArgs, ActionErrorLike>;
+
+  /** Definition-level success callback. Fires on every successful dispatch.
+   *  Mirrors TanStack Query's mutation-level onSuccess. */
+  onSuccess?: (result: TResult, args: TArgs) => void;
+
+  /** Definition-level error callback. Fires on every failed dispatch.
+   *  Mirrors TanStack Query's mutation-level onError. */
+  onError?: (err: ActionErrorLike, args: TArgs) => void;
+
+  /** Definition-level settled callback. Fires after every dispatch
+   *  (success, error, or cancellation). Mirrors TanStack Query's onSettled. */
+  onSettled?: (args: TArgs) => void;
+
+  /** Classify whether an error qualifies for retry. */
+  retryable?: (err: ActionErrorLike) => boolean;
+
+  /** Auto-retry transient failures before surfacing the error notification. */
+  retry?: RetryConfig;
+
+  /** Auto-retry behavior when offline. Default `"online"`. */
+  networkMode?: "online" | "always";
+
+  /** Timeout in milliseconds for the run() function. Uses AbortSignal.timeout()
+   *  composed with the cancellation signal. If run() exceeds this duration,
+   *  the signal aborts with a TimeoutError. */
+  timeout?: number;
+
+  /** Serialize concurrent dispatches sharing the same scope key. */
+  scope?: string | ((args: TArgs) => string);
+
+  /** Generate an idempotency key per dispatch. */
+  idempotencyKey?: boolean | ((args: TArgs) => string);
+
+  /** Collapse concurrent dispatches with matching key into one in-flight promise. */
+  dedupe?: boolean | ((args: TArgs) => string);
+
+  /** For a call carrying a plaintext secret: the action log and every
+   *  registry listener get each instance without `args`, `result` and
+   *  `error`, so the result and the error reach only the dispatch's handle,
+   *  the callbacks and the notifications (the default and string error
+   *  notifications quote the error's message). Combined with `retry` or
+   *  `retryable`, defineAction() throws: a retry button would hold the args. */
+  sensitive?: true;
+}
+
+/** A registered action, returned by defineAction(). Can be dispatched
+ *  many times; each dispatch is a separate instance with its own
+ *  cancellation token. */
+export interface Action<TArgs, TResult> {
+  readonly name: string;
+
+  /** Run the action. Returns a DispatchHandle with the result promise
+   *  and a per-dispatch abort() method (RTK pattern). */
+  dispatch(args: TArgs, opts?: DispatchOptions<TArgs, TResult>): DispatchHandle<TResult>;
+
+  /** Cancel all in-flight instances. Each instance moves to status
+   *  "cancelled" and run()'s signal aborts. */
+  cancel(): void;
+}
+
+/** Typed terminal outcome of a single dispatch, resolved by
+ *  {@link DispatchHandle.outcome}. Distinguishes the three states the
+ *  handle's own `TResult | null` resolution collapses: success (including a
+ *  legitimate `null` / `undefined` result), failure (carrying the normalized
+ *  error), and cancellation. */
+export type ActionOutcome<TResult> =
+  | { readonly status: "success"; readonly value: TResult; readonly attempts?: number }
+  | { readonly status: "error"; readonly error: ActionErrorLike; readonly attempts?: number }
+  | { readonly status: "cancelled" };
+
+/** Handle returned by dispatch(). An augmented Promise with an abort()
+ *  method for per-dispatch cancellation (mirrors RTK createAsyncThunk).
+ *  Can be awaited directly as a Promise. */
+export interface DispatchHandle<TResult> extends Promise<TResult | null> {
+  /** Abort this specific dispatch; other in-flight dispatches of the same
+   *  action are unaffected. One still queued behind its `scope` settles
+   *  cancelled at once. On a handle that joined through `dedupe`, only this
+   *  call settles cancelled: the dispatch it joined keeps running. */
+  abort(): void;
+  /** Opt-in typed terminal outcome. Resolves alongside the handle (it never
+   *  rejects) with a discriminated {@link ActionOutcome}, letting a caller
+   *  distinguish a legitimate `null` result from failure or cancellation
+   *  without wiring callbacks. The never-rejecting `TResult | null`
+   *  resolution and the callback tiers remain the canonical surface. */
+  readonly outcome: Promise<ActionOutcome<TResult>>;
+}
+
+/** Per-dispatch overrides. */
+export interface DispatchOptions<TArgs = unknown, TResult = unknown> {
+  /** Suppress the success notification for this call. Errors still notify. */
+  readonly silent?: boolean;
+  /** Per-call success callback. Fires after the action-level notification. */
+  readonly onSuccess?: (result: TResult, args: TArgs) => void;
+  /** Per-call error callback. Fires after the action-level error notification. */
+  readonly onError?: (err: ActionErrorLike, args: TArgs) => void;
+  /** Per-call settled callback. Fires for success, error, AND cancellation. */
+  readonly onSettled?: (args: TArgs) => void;
+  /** Aborting it cancels this dispatch as `abort()` does: before it starts
+   *  (a dispatch queued behind its `scope` settles at once and never runs),
+   *  or mid-run, aborting run()'s signal with this signal's reason. An
+   *  already-aborted signal cancels the dispatch without running it. */
+  readonly signal?: AbortSignal;
+}
+
+/** HTTP request descriptor used by apiAction(). GET is included for
+ *  read actions that want notification/cancellation semantics. */
+export type RequestSpec =
+  | {
+      readonly method: "GET";
+      readonly path: string;
+      readonly headers?: Readonly<Record<string, string>>;
+    }
+  | {
+      readonly method: "POST" | "PUT" | "PATCH" | "DELETE";
+      readonly path: string;
+      /** JSON-encoded request body. Mutually exclusive with `rawBody`. */
+      readonly body?: unknown;
+      /** Pre-encoded request body, sent as-is with NO JSON encoding and NO
+       *  automatic Content-Type — set the type via `headers` (e.g. a YAML
+       *  document with `Content-Type: text/yaml`). The request() function is
+       *  the encoder seam: compute the encoded payload there per dispatch.
+       *  Mutually exclusive with `body`. */
+      readonly rawBody?: BodyInit;
+      readonly headers?: Readonly<Record<string, string>>;
+    };
+
+/** Subscriber callback for the registry. Fires once per state
+ *  transition (pending -> success/error/cancelled). */
+export type RegistryListener = (instance: ActionInstance) => void;

@@ -1,6 +1,6 @@
 # Signals, stores and collections
 
-This page describes how the state half of reactive behaves, which covers signals, computed values, effects, owners, resources, stores, collections and the event bus. It is for a developer writing effects and stores who needs the exact rules. None of these functions needs a DOM.
+This page describes how `@cplieger/reactive/signal` behaves, which covers signals, computed values, effects, owners, resources, stores, collections and the event bus. It is for a developer writing effects and stores who needs the exact rules. None of these functions needs a DOM.
 
 ## The flush model
 
@@ -45,7 +45,7 @@ An owner disposes a tree of effects at once, such as everything a page or a dial
 - The current owner is not exported. Get an owner from `createRoot`'s callback or a `bindList` row.
 
 ```typescript
-import { createRoot, effect, runWithOwner, signal } from "@cplieger/reactive";
+import { createRoot, effect, runWithOwner, signal } from "@cplieger/reactive/signal";
 
 const route = signal("/library");
 
@@ -86,7 +86,7 @@ disposeApp(); // every effect stops, and the listener given owner.signal is remo
 - `refetch()` starts a new run for the current source value, and does nothing once the owner is being disposed.
 
 ```typescript
-import { createRoot, effect, resource, signal } from "@cplieger/reactive";
+import { createRoot, effect, resource, signal } from "@cplieger/reactive/signal";
 
 const id = signal("a");
 
@@ -121,7 +121,7 @@ import {
   subscribe,
   isSignal,
   isComputed,
-} from "@cplieger/reactive";
+} from "@cplieger/reactive/signal";
 
 const count = signal(0);
 const doubled = computed(() => count.value * 2);
@@ -164,7 +164,7 @@ isComputed(doubled); // true
 - `computed(outputKey, fn)` derives a key. It is an eager effect, not a lazy engine computed. It writes `outputKey` every time a dependency of `fn` changes, and it returns the effect's dispose function. So `fn` runs whether or not anyone reads the key. A throwing `fn` goes to the effect error handler instead of being cached and rethrown at the read. `set(outputKey, value)` still works between recomputes.
 - A `computed` key whose `fn` reads its own output does not loop without end. A self-read that keeps producing new values reports `Error("Cycle detected")` through the effect error handler, and a self-read that settles on a stable value stops. The guard re-arms on each write, so a key that is still cyclic reports again on the next write to it. Effects queued beside the cycle, such as a `subscribe` on the same key, stay reactive.
 
-The store has no `effect` or `batch` member. A store member exists only where it does something the engine's function of the same name does not, and `store.batch(...)` would read as "batch this store's writes" while it batched the whole graph. Import `effect` and `batch` from the package root.
+The store has no `effect` or `batch` member. A store member exists only where it does something the engine's function of the same name does not, and `store.batch(...)` would read as "batch this store's writes" while it batched the whole graph. Import `effect` and `batch` from `@cplieger/reactive/signal`.
 
 `SignalMap<V>` is a registry of signals keyed by a string id that is known only at run time, such as per-message streaming text or per-row state. It complements the fixed keys of `createStore`.
 

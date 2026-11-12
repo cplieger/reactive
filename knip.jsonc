@@ -1,13 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  // No suppressions: this package has no unused files, exports, types or
-  // dependencies, and every entry point is reachable from package.json
-  // `exports` or knip's own defaults. treatConfigHintsAsErrors is the guard
-  // that keeps it that way — a row added here that stops being needed fails
-  // the gate instead of becoming a silent stale suppression.
+  // A suppression added here that stops matching fails the gate instead of going stale.
   "treatConfigHintsAsErrors": true,
-  // Import cycles fail the gate. `cycles` is knip's one warn-level issue type, so
-  // without this it prints and still exits 0 — and under ts-ci's continue-on-error
-  // plus marker-file trailer that reads as a green check with a warning nobody sees.
+  // cycles is knip's one warn-level issue type: without this it prints and exits 0.
   "rules": { "cycles": "error" },
 }

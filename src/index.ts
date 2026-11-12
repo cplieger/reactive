@@ -1,39 +1,4 @@
-export {
-  signal,
-  effect,
-  batch,
-  setEffectErrorHandler,
-  computed,
-  untracked,
-  touch,
-  subscribe,
-  isSignal,
-  isComputed,
-  on,
-  createRoot,
-  runWithOwner,
-} from "./signal.js";
-export type {
-  Signal,
-  Cleanup,
-  EffectErrorHandler,
-  Owner,
-  ReadonlySignal,
-  SignalOptions,
-} from "./signal.js";
-export { resource } from "./resource.js";
-export type { Loadable, Resource, ResourceOptions } from "./resource.js";
-export { createStore } from "./store.js";
-export type { Store } from "./store.js";
-export { SignalMap } from "./signal-map.js";
-export { createCollection } from "./collection.js";
-export type { Collection } from "./collection.js";
-export { bindList } from "./bind-list.js";
-export type { ListSpec, ListSource } from "./bind-list.js";
-export { createBus } from "./bus.js";
-export type { Bus, BusHandler } from "./bus.js";
-export { el } from "./el.js";
-export type { AttrValue } from "./el.js";
-export { reconcile, KEY_ATTR } from "./reconcile.js";
-export type { ReconcileSpec } from "./reconcile.js";
-export { patch, trackHandler } from "./reconcile-tree.js";
+/** Signals, effects, owners, stores and the DOM helpers: every name in `@cplieger/reactive/signal` and `@cplieger/reactive/dom`. @module */
+
+export * from "./signal/index.js";
+export * from "./dom/index.js";

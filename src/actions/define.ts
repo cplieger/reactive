@@ -1,0 +1,851 @@
+import { notifyError, notifySuccess } from "./notifier.js";
+import { toActionError } from "./error.js";
+import { record } from "./registry.js";
+import { sleep, waitForOnline, attachAttempts, readAttempts } from "./retry.js";
+import { _registerAction } from "./cleanup.js";
+import {
+  safeInvoke,
+  safeStringify,
+  _resetSymbols,
+  resolveNotification,
+  defaultErrorPrefix,
+} from "./define-helpers.js";
+import type {
+  Action,
+  ActionContext,
+  ActionDefinition,
+  ActionErrorLike,
+  ActionInstanceFields,
+  ActionOutcome,
+  DispatchHandle,
+  DispatchOptions,
+} from "./types.js";
+
+let instanceCounter = 0;
+
+// Prefixed onto dedupe keys so two definitions sharing a name can never join
+// each other's in-flight promise (cross-definition `as TResult` hazard).
+let defCounter = 0;
+
+const registeredNames = new Set<string>();
+
+const NO_OPTS = Object.freeze({}) as DispatchOptions;
+const NOOP = (): void => {
+  /* noop */
+};
+
+/** Preserves TimeoutError when aborted via AbortSignal.timeout(). */
+function signalAbortError(signal: AbortSignal): DOMException {
+  if (signal.reason instanceof DOMException && signal.reason.name === "TimeoutError") {
+    return signal.reason;
+  }
+  return new DOMException("aborted", "AbortError");
+}
+
+function nextInstanceID(name: string): string {
+  instanceCounter += 1;
+  return `${name}#${String(instanceCounter)}`;
+}
+
+/** Header name used by apiAction when an idempotency key is generated. */
+export const IDEMPOTENCY_HEADER = "Idempotency-Key";
+
+function generateIdempotencyKey(): string {
+  const ts = Date.now().toString(36);
+  const buf = new Uint8Array(10);
+  crypto.getRandomValues(buf);
+  let rnd = "";
+  for (const b of buf) {
+    rnd += b.toString(36).padStart(2, "0");
+  }
+  return `${ts}-${rnd.slice(0, 14)}`;
+}
+
+const scopeChains = new Map<string, Promise<unknown>>();
+
+function makeHandle<T>(
+  promise: Promise<T | null>,
+  abortFn: () => void,
+  outcome: Promise<ActionOutcome<T>>,
+): DispatchHandle<T> {
+  const handle = promise as DispatchHandle<T> & { outcome: Promise<ActionOutcome<T>> };
+  handle.abort = abortFn;
+  handle.outcome = outcome;
+  return handle;
+}
+
+/** How the leader dispatch ended, written by `runOnce` and read by every
+ *  dispatch that joined its in-flight promise. `error` and `succeeded` are
+ *  exhaustive: a leader that resolves `null` with neither set was cancelled. */
+interface DedupeOutcome {
+  error?: ActionErrorLike;
+  succeeded?: boolean;
+}
+/** A slot reaches `activeDedupes` only once its leader's promise exists, which
+ *  is what lets a joiner read `promise` without a presence check. */
+interface DedupeSlot extends DedupeOutcome {
+  promise: Promise<unknown>;
+}
+const activeDedupes = new Map<string, DedupeSlot>();
+
+type InstanceFields = Omit<ActionInstanceFields, "name"> & { readonly error?: ActionErrorLike };
+
+/**
+ * Register an action and return the handle callers dispatch; call it once per
+ * action at module scope. A duplicate `def.name` only warns, and name-keyed
+ * helpers then answer for both definitions. Throws a TypeError for a
+ * `sensitive` definition with `retry` or `retryable`. Cancellation (`timeout`,
+ * `abort()`, `cancel()`, the dispatch's `signal`, page unload) only aborts the
+ * signal passed to `run`; a run that ignores it completes, result discarded.
+ */
+export function defineAction<TArgs, TResult, TOp = unknown>(
+  def: ActionDefinition<TArgs, TResult, TOp>,
+): Action<TArgs, TResult> {
+  if (def.sensitive === true && (def.retry !== undefined || def.retryable !== undefined)) {
+    throw new TypeError(
+      `[actions] "${def.name}" is sensitive, so it takes neither retry nor retryable: a retry button would hold its args`,
+    );
+  }
+  defCounter += 1;
+  const defId = defCounter;
+  if (registeredNames.has(def.name)) {
+    console.warn(
+      `[actions] duplicate action name "${def.name}" — the registry log and name-keyed helpers (isPending, subscribeByName, bindLoadingState) will conflate the two definitions`,
+    );
+  } else {
+    registeredNames.add(def.name);
+  }
+  const inFlight = new Map<string, AbortController>();
+  const started = new Set<string>();
+  const scopeSkips = new Map<
+    string,
+    { readonly prev: Promise<unknown>; readonly resolve: () => void }
+  >();
+  const scopeCancelResolvers = new Map<string, () => void>();
+  const activeDedupeKeys = new Set<string>();
+
+  // Every registry write goes through here. A `sensitive` record copies only
+  // the lifecycle fields by name, never a spread, so args, result, an error
+  // whose message or cause holds them, and any field added later stay out of
+  // the log and every listener.
+  function recordState(
+    fields: InstanceFields,
+    args: TArgs,
+    success?: { readonly result: TResult },
+  ): void {
+    if (def.sensitive !== true) {
+      record({ ...fields, name: def.name, args, ...success });
+      return;
+    }
+    const { id, status, dispatchedAt, startedAt, completedAt, attempts } = fields;
+    record({
+      id,
+      name: def.name,
+      status,
+      dispatchedAt,
+      startedAt,
+      ...(completedAt !== undefined && { completedAt }),
+      ...(attempts !== undefined && { attempts }),
+      sensitive: true,
+    });
+  }
+
+  function fireDefSuccess(result: TResult, args: TArgs): void {
+    if (def.onSuccess) {
+      const cb = def.onSuccess;
+      safeInvoke(def.name, "def.onSuccess", () => {
+        cb(result, args);
+      });
+    }
+  }
+  function fireDefError(err: ActionErrorLike, args: TArgs): void {
+    if (def.onError) {
+      const cb = def.onError;
+      safeInvoke(def.name, "def.onError", () => {
+        cb(err, args);
+      });
+    }
+  }
+  function fireDefSettled(args: TArgs): void {
+    if (def.onSettled) {
+      const cb = def.onSettled;
+      safeInvoke(def.name, "def.onSettled", () => {
+        cb(args);
+      });
+    }
+  }
+  // Shared by the executing path and the dedupe-join path.
+  function fireSuccessCallbacks(
+    result: TResult,
+    args: TArgs,
+    opts: DispatchOptions<TArgs, TResult>,
+  ): void {
+    fireDefSuccess(result, args);
+    const onSuccessCb = opts.onSuccess;
+    if (onSuccessCb) {
+      safeInvoke(def.name, "onSuccess", () => {
+        onSuccessCb(result, args);
+      });
+    }
+  }
+  // Shared by the executing path and the dedupe-join path.
+  function fireErrorCallbacks(
+    err: ActionErrorLike,
+    args: TArgs,
+    opts: DispatchOptions<TArgs, TResult>,
+  ): void {
+    fireDefError(err, args);
+    const onErrorCb = opts.onError;
+    if (onErrorCb) {
+      safeInvoke(def.name, "onError", () => {
+        onErrorCb(err, args);
+      });
+    }
+  }
+
+  // A joiner owns no run, so aborting it (handle or signal) settles this call
+  // alone as cancelled and leaves the dispatch it joined running.
+  function joinDispatch(
+    entry: DedupeSlot,
+    args: TArgs,
+    opts: DispatchOptions<TArgs, TResult>,
+    outcomePromise: Promise<ActionOutcome<TResult>>,
+    resolveOutcome: (o: ActionOutcome<TResult>) => void,
+    fireSettledHooks: () => void,
+  ): DispatchHandle<TResult> {
+    const ext = opts.signal;
+    let done = false;
+    let resolveHandle!: (v: TResult | null) => void;
+    const handlePromise = new Promise<TResult | null>((r) => {
+      resolveHandle = r;
+    });
+    const finish = (): boolean => {
+      if (done) {
+        return false;
+      }
+      done = true;
+      ext?.removeEventListener("abort", detach);
+      return true;
+    };
+    function detach(): void {
+      if (finish()) {
+        resolveOutcome({ status: "cancelled" });
+        fireSettledHooks();
+        resolveHandle(null);
+      }
+    }
+    (entry.promise as Promise<TResult | null>).then(
+      (v) => {
+        if (!finish()) {
+          return;
+        }
+        if (v !== null || entry.succeeded === true) {
+          fireSuccessCallbacks(v as TResult, args, opts);
+          resolveOutcome({ status: "success", value: v as TResult });
+        } else if (entry.error !== undefined) {
+          const capturedErr = entry.error;
+          fireErrorCallbacks(capturedErr, args, opts);
+          resolveOutcome({ status: "error", error: capturedErr });
+        } else {
+          resolveOutcome({ status: "cancelled" });
+        }
+        fireSettledHooks();
+        resolveHandle(v);
+      },
+      (reason: unknown) => {
+        // Reached when the leader's own setup threw before `runOnce` could
+        // record an outcome, e.g. a `def.idempotencyKey` that raises.
+        if (!finish()) {
+          return;
+        }
+        resolveOutcome({ status: "error", error: toActionError(reason) });
+        fireSettledHooks();
+        resolveHandle(null);
+      },
+    );
+    if (ext?.aborted === true) {
+      detach();
+    } else {
+      ext?.addEventListener("abort", detach);
+    }
+    return makeHandle(handlePromise, detach, outcomePromise);
+  }
+
+  // A dispatch still queued behind its scope settles here at once and frees
+  // its place in the chain; a started one is left to runOnce, which sees the
+  // aborted signal.
+  function abortDispatch(id: string, reason?: unknown): void {
+    const controller = inFlight.get(id);
+    if (controller === undefined) {
+      return;
+    }
+    controller.abort(reason);
+    if (started.has(id)) {
+      return;
+    }
+    inFlight.delete(id);
+    const queued = scopeSkips.get(id);
+    if (queued !== undefined) {
+      scopeSkips.delete(id);
+      void queued.prev.then(queued.resolve, queued.resolve);
+    }
+    const earlyCancel = scopeCancelResolvers.get(id);
+    if (earlyCancel !== undefined) {
+      scopeCancelResolvers.delete(id);
+      earlyCancel();
+    }
+  }
+
+  function dispatch(
+    args: TArgs,
+    opts: DispatchOptions<TArgs, TResult> = NO_OPTS,
+  ): DispatchHandle<TResult> {
+    // Kept OUT of the legacy promise chain so existing resolution timing is untouched.
+    let resolveOutcome!: (o: ActionOutcome<TResult>) => void;
+    const outcomePromise = new Promise<ActionOutcome<TResult>>((r) => {
+      resolveOutcome = r;
+    });
+    const fireSettledHooks = (): void => {
+      fireDefSettled(args);
+      const onSettledCb = opts.onSettled;
+      if (onSettledCb) {
+        safeInvoke(def.name, "onSettled", () => {
+          onSettledCb(args);
+        });
+      }
+    };
+    const dedupeKey = dedupeKeyFor(args);
+    if (dedupeKey !== null) {
+      const entry = activeDedupes.get(dedupeKey);
+      if (entry !== undefined) {
+        return joinDispatch(entry, args, opts, outcomePromise, resolveOutcome, fireSettledHooks);
+      }
+    }
+
+    const scopeKey =
+      typeof def.scope === "function"
+        ? def.scope(args)
+        : typeof def.scope === "string"
+          ? def.scope
+          : null;
+
+    const ac = new AbortController();
+    const id = nextInstanceID(def.name);
+    inFlight.set(id, ac);
+    const dispatchedAt = Date.now();
+    const ext = opts.signal;
+    const onExtAbort = (): void => {
+      abortDispatch(id, ext?.reason);
+    };
+    // Aborted before runOnce, which starts synchronously when unscoped and
+    // must take its cancelled branch without calling `run`; a scoped dispatch
+    // is released from its queue once the chain below exists.
+    if (ext?.aborted === true) {
+      ac.abort();
+    } else {
+      ext?.addEventListener("abort", onExtAbort);
+    }
+
+    const dedupeEntry: DedupeOutcome | null = dedupeKey !== null ? {} : null;
+
+    let result: Promise<TResult | null>;
+    if (scopeKey === null) {
+      result = runOnce(args, opts, ac, id, dedupeEntry, dedupeKey, dispatchedAt, resolveOutcome);
+    } else {
+      const prev = scopeChains.get(scopeKey) ?? Promise.resolve();
+      const next = prev.then(() =>
+        runOnce(args, opts, ac, id, dedupeEntry, dedupeKey, dispatchedAt, resolveOutcome),
+      );
+      let tailResolve!: () => void;
+      const tail = new Promise<void>((r) => {
+        tailResolve = r;
+      });
+      // Paired in one entry because a skip that resolved ahead of `prev` would
+      // let a cancelled dispatch jump its own scope chain.
+      scopeSkips.set(id, { prev, resolve: tailResolve });
+      void next.then(tailResolve, tailResolve);
+      scopeChains.set(scopeKey, tail);
+      void next
+        .finally(() => {
+          scopeSkips.delete(id);
+          scopeCancelResolvers.delete(id);
+          if (scopeChains.get(scopeKey) === tail) {
+            scopeChains.delete(scopeKey);
+          }
+        })
+        .catch(NOOP);
+      let earlyCancelResolve!: (v: TResult | null) => void;
+      const earlyCancel = new Promise<TResult | null>((r) => {
+        earlyCancelResolve = r;
+      });
+      scopeCancelResolvers.set(id, () => {
+        try {
+          const now = Date.now();
+          evictDedupeSlot(dedupeKey, dedupeEntry);
+          recordState(
+            {
+              id,
+              status: "cancelled",
+              dispatchedAt,
+              startedAt: now,
+              completedAt: now,
+            },
+            args,
+          );
+        } finally {
+          fireSettledHooks();
+          resolveOutcome({ status: "cancelled" });
+          earlyCancelResolve(null);
+        }
+      });
+      result = Promise.race([next, earlyCancel]);
+      if (ac.signal.aborted) {
+        abortDispatch(id);
+      }
+    }
+    if (ext !== undefined) {
+      void result
+        .finally(() => {
+          ext.removeEventListener("abort", onExtAbort);
+        })
+        .catch(NOOP);
+    }
+
+    // A dedupe slot must describe a dispatch that is still running: runOnce's
+    // synchronous failure paths already left `inFlight`, so publishing a slot
+    // for them would hand the next same-key dispatch a finished error instead
+    // of letting it run.
+    if (dedupeKey !== null && dedupeEntry !== null && inFlight.has(id)) {
+      // `Object.assign` rather than a fresh object: `runOnce` holds this same
+      // reference and writes the leader's outcome onto it after publication.
+      const published: DedupeSlot = Object.assign(dedupeEntry, { promise: result });
+      activeDedupes.set(dedupeKey, published);
+      activeDedupeKeys.add(dedupeKey);
+      void result
+        .finally(() => {
+          if (activeDedupes.get(dedupeKey) === published) {
+            activeDedupes.delete(dedupeKey);
+            activeDedupeKeys.delete(dedupeKey);
+          }
+        })
+        .catch(NOOP);
+    }
+
+    return makeHandle(
+      result,
+      () => {
+        abortDispatch(id);
+      },
+      outcomePromise,
+    );
+  }
+
+  function dedupeKeyFor(args: TArgs): string | null {
+    const cfg = def.dedupe;
+    if (cfg === undefined || cfg === false) {
+      return null;
+    }
+    const argKey = typeof cfg === "function" ? cfg(args) : safeStringify(args);
+    // Without the defId prefix, two same-named definitions would join each
+    // other's in-flight promise and coerce a foreign result via `as TResult`.
+    return `${String(defId)}::${def.name}::${argKey}`;
+  }
+
+  function evictDedupeSlot(dk: string | null, entry: DedupeOutcome | null): void {
+    if (dk !== null && entry !== null && activeDedupes.get(dk) === entry) {
+      activeDedupes.delete(dk);
+      activeDedupeKeys.delete(dk);
+    }
+  }
+
+  async function runOnce(
+    args: TArgs,
+    opts: DispatchOptions<TArgs, TResult>,
+    ac: AbortController,
+    id: string,
+    dedupeEntry: DedupeOutcome | null,
+    dedupeKey: string | null,
+    dispatchedAt: number,
+    resolveOutcome: (o: ActionOutcome<TResult>) => void,
+  ): Promise<TResult | null> {
+    started.add(id);
+    if (!inFlight.has(id) && ac.signal.aborted) {
+      started.delete(id);
+      resolveOutcome({ status: "cancelled" });
+      return null;
+    }
+    const settle = (): void => {
+      inFlight.delete(id);
+      started.delete(id);
+      const onSettledCb = opts.onSettled;
+      if (onSettledCb) {
+        safeInvoke(def.name, "onSettled", () => {
+          onSettledCb(args);
+        });
+      }
+    };
+
+    // Reached only by an unscoped dispatch whose signal was aborted before it,
+    // so no dedupe slot was published yet.
+    if (ac.signal.aborted) {
+      const now = Date.now();
+      recordState(
+        {
+          id,
+          status: "cancelled",
+          dispatchedAt,
+          startedAt: now,
+          completedAt: now,
+        },
+        args,
+      );
+      fireDefSettled(args);
+      resolveOutcome({ status: "cancelled" });
+      settle();
+      return null;
+    }
+
+    const startedAt = Date.now();
+
+    const idemKey =
+      typeof def.idempotencyKey === "function"
+        ? def.idempotencyKey(args)
+        : def.idempotencyKey === true
+          ? generateIdempotencyKey()
+          : null;
+    const ctx: ActionContext =
+      idemKey !== null ? { instanceID: id, idempotencyKey: idemKey } : { instanceID: id };
+
+    const runSignal =
+      def.timeout !== undefined
+        ? AbortSignal.any([ac.signal, AbortSignal.timeout(def.timeout)])
+        : ac.signal;
+
+    let optOp: TOp | undefined;
+    if (def.optimistic !== undefined) {
+      try {
+        optOp = def.optimistic(args);
+      } catch (e) {
+        const raw = toActionError(e);
+        const err: ActionErrorLike =
+          raw.code !== undefined ? raw : { ...raw, code: "optimistic_failed" };
+        if (dedupeEntry !== null) {
+          dedupeEntry.error = err;
+        }
+        evictDedupeSlot(dedupeKey, dedupeEntry);
+        recordState(
+          {
+            id,
+            status: "error",
+            dispatchedAt,
+            startedAt,
+            completedAt: Date.now(),
+            error: err,
+          },
+          args,
+        );
+        emitErrorToast(args, err);
+        fireErrorCallbacks(err, args, opts);
+        fireDefSettled(args);
+        resolveOutcome({ status: "error", error: err });
+        settle();
+        return null;
+      }
+    }
+
+    recordState(
+      {
+        id,
+        status: "pending",
+        dispatchedAt,
+        startedAt,
+      },
+      args,
+    );
+
+    try {
+      const { result, attempts } = await runWithRetry(args, runSignal, ctx);
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- signal state changes during async
+      if (ac.signal.aborted) {
+        evictDedupeSlot(dedupeKey, dedupeEntry);
+        recordState(
+          {
+            id,
+            status: "cancelled",
+            dispatchedAt,
+            startedAt,
+            completedAt: Date.now(),
+            attempts,
+          },
+          args,
+        );
+        if (def.rollback !== undefined) {
+          try {
+            def.rollback(args, optOp, { message: "cancelled", code: "cancelled" });
+          } catch (e) {
+            console.error(`[actions] rollback (cancellation) for ${def.name} threw`, e);
+          }
+        }
+        fireDefSettled(args);
+        resolveOutcome({ status: "cancelled" });
+        return null;
+      }
+      recordState(
+        {
+          id,
+          status: "success",
+          dispatchedAt,
+          startedAt,
+          completedAt: Date.now(),
+          attempts,
+        },
+        args,
+        { result },
+      );
+      if (dedupeEntry !== null) {
+        dedupeEntry.succeeded = true;
+      }
+      evictDedupeSlot(dedupeKey, dedupeEntry);
+      emitSuccessToast(args, result, opts);
+      fireSuccessCallbacks(result, args, opts);
+      fireDefSettled(args);
+      resolveOutcome({ status: "success", value: result, attempts });
+      return result;
+    } catch (e: unknown) {
+      const err = toActionError(e);
+      const attempts = readAttempts(e);
+      const cancelled = ac.signal.aborted as boolean;
+      const status = cancelled ? "cancelled" : "error";
+      if (dedupeEntry !== null && !cancelled) {
+        dedupeEntry.error = err;
+      }
+      evictDedupeSlot(dedupeKey, dedupeEntry);
+      recordState(
+        {
+          id,
+          status,
+          dispatchedAt,
+          startedAt,
+          completedAt: Date.now(),
+          ...(!cancelled && { error: err }),
+          ...(attempts !== undefined && { attempts }),
+        },
+        args,
+      );
+      if (def.rollback !== undefined) {
+        try {
+          const rbError = cancelled ? { message: "cancelled", code: "cancelled" } : err;
+          def.rollback(args, optOp, rbError);
+        } catch (rbCaught) {
+          console.error(`[actions] rollback for ${def.name} threw`, rbCaught);
+        }
+      }
+      if (!cancelled) {
+        emitErrorToast(args, err);
+        fireErrorCallbacks(err, args, opts);
+      }
+      fireDefSettled(args);
+      if (cancelled) {
+        resolveOutcome({ status: "cancelled" });
+      } else {
+        resolveOutcome({
+          status: "error",
+          error: err,
+          ...(attempts !== undefined && { attempts }),
+        });
+      }
+      return null;
+    } finally {
+      settle();
+    }
+  }
+
+  async function runWithRetry(
+    args: TArgs,
+    signal: AbortSignal,
+    ctx: ActionContext,
+  ): Promise<{ result: TResult; attempts: number }> {
+    const cfg = def.retry;
+    const maxAttempts = (cfg?.count ?? 0) + 1;
+    const baseDelay = cfg?.delay;
+    const factor = cfg?.factor ?? 2;
+    const networkMode = def.networkMode ?? "online";
+    let attempt = 0;
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- intentional infinite loop with throw exits
+    while (true) {
+      if (signal.aborted) {
+        const abortErr = signalAbortError(signal);
+        attachAttempts(abortErr, attempt);
+        throw abortErr;
+      }
+      try {
+        attempt++;
+        const result = await def.run(args, signal, ctx);
+        return { result, attempts: attempt };
+      } catch (e) {
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- signal state changes during async
+        if (signal.aborted) {
+          attachAttempts(e, attempt);
+          throw e;
+        }
+        if (attempt >= maxAttempts) {
+          attachAttempts(e, attempt);
+          throw e;
+        }
+        const err = toActionError(e);
+        if (!shouldRetry(err)) {
+          attachAttempts(e, attempt);
+          throw e;
+        }
+
+        if (networkMode === "online") {
+          try {
+            await waitForOnline(signal);
+          } catch {
+            const abortErr = signalAbortError(signal);
+            attachAttempts(abortErr, attempt);
+            throw abortErr;
+          }
+        }
+
+        let delayMs: number;
+        if (typeof baseDelay === "function") {
+          try {
+            delayMs = baseDelay(attempt, err);
+          } catch {
+            delayMs = 0;
+          }
+        } else if (typeof baseDelay === "number") {
+          delayMs = Math.min(baseDelay * Math.pow(factor, attempt - 1), 5000);
+        } else {
+          delayMs = 0;
+        }
+
+        try {
+          await sleep(delayMs, signal);
+        } catch {
+          const abortErr = signalAbortError(signal);
+          attachAttempts(abortErr, attempt);
+          throw abortErr;
+        }
+      }
+    }
+  }
+
+  function shouldRetry(err: ActionErrorLike): boolean {
+    if (def.retryable === undefined) {
+      return false;
+    }
+    try {
+      return def.retryable(err);
+    } catch {
+      return false;
+    }
+  }
+
+  function emitSuccessToast(
+    args: TArgs,
+    result: TResult,
+    opts: DispatchOptions<TArgs, TResult>,
+  ): void {
+    if (opts.silent === true) {
+      return;
+    }
+    try {
+      const msg = resolveNotification(def.success, args, result);
+      if (msg !== null) {
+        notifySuccess(msg);
+      }
+    } catch (e) {
+      console.error(`[actions] emitSuccessToast for ${def.name} threw`, e);
+    }
+  }
+
+  function emitErrorToast(args: TArgs, err: ActionErrorLike): void {
+    const spec = def.error;
+    if (spec === false) {
+      return;
+    }
+    const fallbackMsg = `${defaultErrorPrefix(def.name)}: ${err.message}`;
+    const retry = buildRetryButton(args, err);
+    try {
+      let msg: string;
+      if (typeof spec === "string") {
+        msg = `${spec}: ${err.message}`;
+      } else if (typeof spec === "function") {
+        msg = spec(args, err);
+      } else {
+        msg = fallbackMsg;
+      }
+      notifyError(msg, retry);
+    } catch (e) {
+      console.error(`[actions] emitErrorToast for ${def.name} threw`, e);
+      notifyError(fallbackMsg, retry);
+    }
+  }
+
+  function buildRetryButton(
+    args: TArgs,
+    err: ActionErrorLike,
+  ): { onClick: () => void } | undefined {
+    if (!shouldRetry(err)) {
+      return undefined;
+    }
+    let frozenArgs: TArgs;
+    try {
+      frozenArgs = structuredClone(args);
+    } catch {
+      if (args === null || args === undefined || typeof args !== "object") {
+        frozenArgs = args;
+      } else {
+        try {
+          frozenArgs = (Array.isArray(args) ? [...args] : { ...args }) as TArgs;
+        } catch {
+          frozenArgs = args;
+        }
+      }
+    }
+    return {
+      onClick: () => {
+        void dispatch(frozenArgs);
+      },
+    };
+  }
+
+  function cancel(): void {
+    if (inFlight.size === 0) {
+      return;
+    }
+    for (const dk of activeDedupeKeys) {
+      activeDedupes.delete(dk);
+    }
+    activeDedupeKeys.clear();
+    for (const id of [...inFlight.keys()]) {
+      abortDispatch(id);
+    }
+  }
+
+  const action: Action<TArgs, TResult> = {
+    name: def.name,
+    dispatch,
+    cancel,
+  };
+
+  _registerAction(action);
+
+  return action;
+}
+
+export function _resetForTest(): void {
+  instanceCounter = 0;
+  defCounter = 0;
+  registeredNames.clear();
+  _resetSymbols();
+  scopeChains.clear();
+  activeDedupes.clear();
+}
+
+// deadset:ignore DS1102 -- the leak tests read the private registry sizes to prove they drain to empty
+export function _internalsForTest(): { scopeChains: number; activeDedupes: number } {
+  return { scopeChains: scopeChains.size, activeDedupes: activeDedupes.size };
+}
